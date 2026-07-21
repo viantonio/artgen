@@ -108,6 +108,16 @@ function renderResearchBoxes(subtopics, researchResults) {
         const statusClass = status;
         const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
+        // Build the compiled user message that gets sent to Gemini (per-box, always visible)
+        const compiledUserMessage = [
+            `ARGUMENT TO PROVE: ${st.angle || ''}`,
+            `WHAT TO DIG FOR: ${st.research_info || ''}`,
+            `SEARCH: ${st.search_query || ''}`,
+            `TITLE: ${st.title || ''}`,
+            '',
+            'Research this argument using Google Search. Document the facts as they fit the argument. Go beyond the obvious. Return the JSON object with your research summary and sources.'
+        ].join('\n');
+
         let bodyHtml = '';
         let actionBtn = '';
 
@@ -164,13 +174,9 @@ function renderResearchBoxes(subtopics, researchResults) {
                     </div>
                     <span class="status ${statusClass}">${statusLabel}</span>
                 </div>
-                <div style="margin-bottom:8px;">
-                    <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Angle</span>
-                    <p style="margin:2px 0 0 0; font-size:13px; line-height:1.5; color:var(--text);">${escapeHtml(st.angle || '—')}</p>
-                </div>
-                <div style="margin-bottom:8px;">
-                    <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Search Query</span>
-                    <p style="margin:2px 0 0 0; font-size:12px; font-family:var(--mono); color:var(--accent); background:var(--bg); padding:6px 10px; border-radius:4px;">${escapeHtml(st.search_query || '—')}</p>
+                <div style="margin-bottom:12px;">
+                    <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">User Message (sent to Gemini)</span>
+                    <pre style="margin:4px 0 0 0; font-size:11px; font-family:var(--mono); line-height:1.5; color:var(--text); background:var(--bg); padding:8px 10px; border-radius:4px; white-space:pre-wrap; overflow-x:auto;">${escapeHtml(compiledUserMessage)}</pre>
                 </div>
                 ${bodyHtml}
                 <div style="margin-top:${bodyHtml ? '12' : '0'}px; display:flex; align-items:center; gap:8px;">
