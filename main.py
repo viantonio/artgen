@@ -981,14 +981,15 @@ STEP2_DEFAULT_PARAMS = {
     "max_tokens": 8192,
     "system_prompt": (
         "You are a research agent. You will be given a specific argument to back up. "
-        "Use Google Search to find evidence that supports it, then document what you "
-        "find in a clear, factual research brief.\n\n"
+        "You MUST use Google Search to find evidence. Do NOT rely on your training data — "
+        "everything you write must be grounded in actual search results.\n\n"
         "Your job is to document the facts as they fit the argument. Go beyond the "
         "obvious surface-level data. Dig into the observable reality: what is actually "
         "happening, why it is happening, what it reveals. Look for the mechanics, the "
         "decisions, the incentives, the cascading effects.\n\n"
-        "Write your research findings directly as a well-structured brief. "
-        "Cite sources naturally inline where you reference them."
+        "Before writing anything, search for multiple angles of the topic. Only write "
+        "your research brief AFTER you have search results. Cite sources naturally "
+        "where you reference specific facts."
     ),
 }
 
@@ -1259,9 +1260,11 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
         f"WHAT TO DIG FOR: {st_fields.get('research_info', '')}\n"
         f"SEARCH: {st_fields.get('search_query', '')}\n"
         f"TITLE: {st_fields.get('title', '')}\n\n"
-        "Research this argument using Google Search. Document the facts "
-        "as they fit the argument. Go beyond the obvious. "
-        "Write your findings as a clear research brief with sources cited."
+        "CRITICAL: You MUST use Google Search right now to research this topic. "
+        "Do not answer from your training data. Execute the search, review the results, "
+        "then write a factual research brief grounded in what you found. "
+        "Search multiple angles — dig deeper than the first result. "
+        "Cite your sources where you reference specific facts."
     )
 
     # Log the full prompt being sent so the user can inspect it
@@ -1442,12 +1445,14 @@ async def _call_gemini(
                     result["sources"] = sources
                     result["status"] = "completed"
                     save_step2_data(step2_data)
+                    usage = resp_data.get("usageMetadata", {})
                     log_entry("INFO", 2, (
                         f"Subtopic #{result.get('topic_id')} — "
                         f"summary {len(response_text)} chars (raw text), "
-                        f"{len(sources)} sources from grounding/annotations, "
-                        f"grounding_metadata_keys={list(grounding.keys())}, "
-                        f"parts_annotated={sum(1 for p in parts if p.get('annotations'))}"
+                        f"{len(sources)} sources from grounding, "
+                        f"toolUsePromptTokenCount={usage.get('toolUsePromptTokenCount', 'N/A')}, "
+                        f"candidatesTokenCount={usage.get('candidatesTokenCount', 'N/A')}, "
+                        f"groundingChunks={len(grounding.get('groundingChunks', []))}"
                     ))
                     return True
 
