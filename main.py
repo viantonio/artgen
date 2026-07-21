@@ -997,7 +997,6 @@ STEP2_DEFAULT_PARAMS = {
         "data points, expert analysis, investigative findings."
     ),
 }
-}
 
 STEP2_MODELS = [
     {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash-Lite (Fastest/Cheapest)"},
