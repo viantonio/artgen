@@ -633,7 +633,7 @@ STEP1_DEFAULT_PARAMS = {
         '      "title": "A sharp, clickable section headline that makes someone want to read it",\n'
         '      "angle": "The argument this section makes — what claim are we advancing? what should the reader be convinced of by the end of this section?",\n'
         '      "research_info": "The kind of evidence that would best support this argument: specific data points, historical examples, expert opinions, case studies, legal rulings, personal accounts, institutional patterns — whatever form of proof makes the argument land hardest",\n'
-        '      "search_query": "A targeted Google search query (5-12 words) designed to find the strongest available sources to back up this section\'s argument — tailored to the type of evidence needed"\n'
+        '      "search_query": "An INVESTIGATIVE search query designed to surface exactly the kind of evidence described in research_info. This is NOT an academic keyword dump. Match your query style to the evidence type: for internal company documents use terms like \'leaked memo\', \'internal document\', \'whistleblower\'; for investigative journalism use \'exposé\', \'investigation reveals\', \'documents show\'; for legal evidence use \'lawsuit\', \'class action\', \'settlement\', \'deposition\'; for former employee accounts use \'former employee reveals\', \'ex-manager testimony\'. Always include specific company/organization names. The query should read like a journalist hunting a story, not a student on Google Scholar. BAD: \'retail companies understaffing profit strategy\'. GOOD: \'Walmart internal memo understaffing policy leaked whistleblower deposition\'"\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
@@ -642,7 +642,7 @@ STEP1_DEFAULT_PARAMS = {
         "- Titles should sound like something you'd click on. No academic paper titles.\n"
         "- Angles must be arguable. Not \"an overview of X\" — more like \"here's why X is actually Y\" or \"the case for X.\" If nobody could disagree with it, the angle isn't sharp enough.\n"
         "- Research info should be specific about what kind of evidence the argument needs. Don't just say \"find sources\" — say what kind of sources and what they should demonstrate.\n"
-        "- Search queries should be crafted to surface the best evidence for the argument, whatever form that evidence takes. Match the query to the type of source you need: academic databases for research, news search for journalism, long-tail queries for niche expertise.\n"
+        "- Search queries should be crafted to surface the best evidence for the argument, whatever form that evidence takes. Match the query to the type of source you need: INVESTIGATIVE terms: 'leaked', 'whistleblower', 'internal memo', 'exposé', 'lawsuit', 'deposition', 'class action', 'former employee reveals', 'documents show', 'investigation found'. Include specific company names, people, or events. The query should sound like a journalist tracking down a story — a bad query sounds like a PhD student on Google Scholar, a good one sounds like someone trying to find the receipts.\n"
         "- Cover the brief completely. The full set of subtopics should leave no major aspect of the brief unexplored.\n"
         "- Order matters. Arrange subtopics in the sequence they should appear in the finished article: open strong, build momentum, end memorably.\n\n"
         "Return ONLY the JSON object, no preamble, no commentary."
