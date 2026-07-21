@@ -115,7 +115,7 @@ function renderResearchBoxes(subtopics, researchResults) {
             `SEARCH: ${st.search_query || ''}`,
             `TITLE: ${st.title || ''}`,
             '',
-            'Research this argument using Google Search. Document the facts as they fit the argument. Go beyond the obvious. Return the JSON object with your research summary and sources.'
+            'CRITICAL: Use Google Search now. Find the evidence described above. Keep it CONCISE — 3-5 paragraphs max. Each sentence should prove the argument with a fact from your search results. No filler, no background, no academic summaries. Just evidence.'
         ].join('\n');
 
         let bodyHtml = '';
