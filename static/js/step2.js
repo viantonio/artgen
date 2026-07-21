@@ -2,6 +2,7 @@
 
 let _currentSystemPrompt = '';
 let _currentModel = '';
+let _userMessageSuffix = '';
 
 document.addEventListener('DOMContentLoaded', () => {
     initStep2();
@@ -43,6 +44,7 @@ async function loadStep2Params() {
         ).join('');
 
         _currentModel = params.model || 'gemini-2.5-flash-lite';
+        _userMessageSuffix = params.user_message_suffix || '';
         document.getElementById('step2-temperature').value = params.temperature || 0.7;
         document.getElementById('temp-value').textContent = (params.temperature || 0.7).toFixed(1);
         document.getElementById('step2-max-tokens').value = params.max_tokens || 8192;
@@ -115,7 +117,7 @@ function renderResearchBoxes(subtopics, researchResults) {
             `SEARCH: ${st.search_query || ''}`,
             `TITLE: ${st.title || ''}`,
             '',
-            'CRITICAL: Use Google Search now. Find the evidence described above. Keep it CONCISE — 3-5 paragraphs max. Each sentence should prove the argument with a fact from your search results. No filler, no background, no academic summaries. Just evidence.'
+            _userMessageSuffix
         ].join('\n');
 
         let bodyHtml = '';

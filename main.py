@@ -975,6 +975,14 @@ def _parse_subtopics_fallback(text: str, count: int) -> list[dict] | None:
 
 # --- Step 2: Subtopic Research ---
 
+# User message suffix appended to Step 1 fields — single source of truth
+STEP2_USER_MESSAGE_SUFFIX = (
+    "CRITICAL: Use Google Search now. Find the evidence described above. "
+    "Keep it CONCISE — 3-5 paragraphs max. Each sentence should prove the "
+    "argument with a fact from your search results. No filler, no background, "
+    "no academic summaries. Just evidence."
+)
+
 STEP2_DEFAULT_PARAMS = {
     "model": "gemini-2.5-flash-lite",
     "temperature": 0.7,
@@ -1077,6 +1085,7 @@ async def get_step2_params_route():
     """Get Step 2 parameters."""
     params = get_step2_params()
     params["available_models"] = STEP2_MODELS
+    params["user_message_suffix"] = STEP2_USER_MESSAGE_SUFFIX
     return params
 
 
@@ -1257,10 +1266,7 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
         f"WHAT TO DIG FOR: {st_fields.get('research_info', '')}\n"
         f"SEARCH: {st_fields.get('search_query', '')}\n"
         f"TITLE: {st_fields.get('title', '')}\n\n"
-        "CRITICAL: Use Google Search now. Find the evidence described above. "
-        "Keep it CONCISE — 3-5 paragraphs max. Each sentence should prove the "
-        "argument with a fact from your search results. No filler, no background, "
-        "no academic summaries. Just evidence."
+        f"{STEP2_USER_MESSAGE_SUFFIX}"
     )
 
     # Log the full prompt being sent so the user can inspect it
