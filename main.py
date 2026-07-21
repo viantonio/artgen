@@ -987,11 +987,10 @@ STEP2_DEFAULT_PARAMS = {
         "obvious surface-level data. Dig into the observable reality: what is actually "
         "happening, why it is happening, what it reveals. Look for the mechanics, the "
         "decisions, the incentives, the cascading effects.\n\n"
-        "Synthesize everything into a focused research brief. Do not cite sources inline "
-        "in your text — sources are captured separately. Just write a clean, thorough "
-        "summary of what the evidence shows.\n\n"
-        "Return ONLY a valid JSON object:\n"
-        '{"research_summary": "Your research findings here..."}\n\n'
+        "Return ONLY a valid JSON object with the research summary AND the sources you used:\n"
+        '{"research_summary": "Your research findings here...", '
+        '"sources": [{"url": "https://...", "title": "Source title"}]}\n\n'
+        "Include every source you actually used. If you did not use any sources, return an empty array. "
         "No preamble, no markdown fences, no extra fields."
     ),
 }
@@ -1264,10 +1263,16 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
         f"SEARCH: {st_fields.get('search_query', '')}\n"
         f"TITLE: {st_fields.get('title', '')}\n\n"
         "Research this argument using Google Search. Document the facts "
-        "as they fit the argument — what's actually happening, why it's "
-        "happening, what the evidence shows. Go beyond the obvious. "
-        "Return ONLY the JSON object."
+        "as they fit the argument. Go beyond the obvious. "
+        "Return the JSON object with your research summary and sources."
     )
+
+    # Log the full prompt being sent so the user can inspect it
+    log_entry("INFO", 2, (
+        f"Prompt for subtopic #{topic_id}:\n"
+        f"--- SYSTEM ---\n{system_prompt[:500]}...\n"
+        f"--- USER ---\n{user_message}"
+    ))
 
     # Build request body
     is_gemini3 = model.startswith("gemini-3")
@@ -1294,8 +1299,19 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
                 "type": "object",
                 "properties": {
                     "research_summary": {"type": "string"},
+                    "sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "url": {"type": "string"},
+                                "title": {"type": "string"},
+                            },
+                            "required": ["url", "title"],
+                        },
+                    },
                 },
-                "required": ["research_summary"],
+                "required": ["research_summary", "sources"],
                 "additionalProperties": False,
             },
         }
@@ -1390,6 +1406,17 @@ async def _call_gemini(
 
                 if parsed and "research_summary" in parsed:
                     result["research_summary"] = parsed["research_summary"]
+
+                    # Format 3: sources from the model's JSON output
+                    for s in parsed.get("sources", []):
+                        url = (s.get("url") or "").strip()
+                        if url and url not in seen_urls:
+                            seen_urls.add(url)
+                            sources.append({
+                                "url": url,
+                                "title": s.get("title", ""),
+                            })
+
                     result["sources"] = sources
                     save_step2_data(step2_data)
                     log_entry("INFO", 2, (
