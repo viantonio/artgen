@@ -633,7 +633,7 @@ STEP1_DEFAULT_PARAMS = {
         '      "title": "A sharp, clickable section headline that makes someone want to read it",\n'
         '      "angle": "The argument this section makes — what claim are we advancing? what should the reader be convinced of by the end of this section?",\n'
         '      "research_info": "The kind of evidence that would best support this argument: specific data points, historical examples, expert opinions, case studies, legal rulings, personal accounts, institutional patterns — whatever form of proof makes the argument land hardest",\n'
-        '      "search_query": "An INVESTIGATIVE search query designed to surface exactly the kind of evidence described in research_info. This is NOT an academic keyword dump. Match your query style to the evidence type: for internal company documents use terms like \'leaked memo\', \'internal document\', \'whistleblower\'; for investigative journalism use \'exposé\', \'investigation reveals\', \'documents show\'; for legal evidence use \'lawsuit\', \'class action\', \'settlement\', \'deposition\'; for former employee accounts use \'former employee reveals\', \'ex-manager testimony\'. Always include specific company/organization names. The query should read like a journalist hunting a story, not a student on Google Scholar. BAD: \'retail companies understaffing profit strategy\'. GOOD: \'Walmart internal memo understaffing policy leaked whistleblower deposition\'"\n'
+        '      "search_query": "THE MOST CRITICAL FIELD. This query drives all downstream research. Start from an OBSERVABLE phenomenon or contradiction — something anyone can see — and search for its hidden explanation. Good queries investigate WHY: \'why are store checkout lanes always empty understaffing profit\' or \'retail stores locking merchandise behind glass labor shortage\'. They connect visible symptoms to hidden causes. Include specific company names and industry terms. BAD queries just list abstract concepts: \'retail understaffing profit strategy\'. GOOD queries hunt for the story behind what people see in the real world: \'Walmart fewer cashiers more profit self-checkout labor cost savings\'. Think like a journalist who noticed something wrong and is searching for who did it, why, and who documented it."\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
@@ -642,7 +642,7 @@ STEP1_DEFAULT_PARAMS = {
         "- Titles should sound like something you'd click on. No academic paper titles.\n"
         "- Angles must be arguable. Not \"an overview of X\" — more like \"here's why X is actually Y\" or \"the case for X.\" If nobody could disagree with it, the angle isn't sharp enough.\n"
         "- Research info should be specific about what kind of evidence the argument needs. Don't just say \"find sources\" — say what kind of sources and what they should demonstrate.\n"
-        "- Search queries should be crafted to surface the best evidence for the argument, whatever form that evidence takes. Match the query to the type of source you need: INVESTIGATIVE terms: 'leaked', 'whistleblower', 'internal memo', 'exposé', 'lawsuit', 'deposition', 'class action', 'former employee reveals', 'documents show', 'investigation found'. Include specific company names, people, or events. The query should sound like a journalist tracking down a story — a bad query sounds like a PhD student on Google Scholar, a good one sounds like someone trying to find the receipts.\n"
+        "- Search queries are THE critical output — Step 2’s entire research quality depends on them. Each query should start from an OBSERVABLE (something anyone can see: empty checkout lanes, locked-up merchandise, stores making record profit with half the staff) and search for the HIDDEN EXPLANATION behind it. Investigate the contradiction. Ask “why does this happen?” and “who benefits?” through your search terms. Craft queries that surface investigative journalism, deep analysis, and documented cases — not academic abstracts. A bad query reads like keywords in Google Scholar, a good one reads like a journalist who noticed something wrong and is hunting for the story behind it. The search terms to use: 'leaked', 'whistleblower', 'internal memo', 'exposé', 'lawsuit', 'deposition', 'class action', 'former employee reveals', 'documents show', 'investigation found'. Include specific company names, people, or events. The query should sound like a journalist tracking down a story — a bad query sounds like a PhD student on Google Scholar, a good one sounds like someone trying to find the receipts.\n"
         "- Cover the brief completely. The full set of subtopics should leave no major aspect of the brief unexplored.\n"
         "- Order matters. Arrange subtopics in the sequence they should appear in the finished article: open strong, build momentum, end memorably.\n\n"
         "Return ONLY the JSON object, no preamble, no commentary."
@@ -800,13 +800,15 @@ async def run_step1():
 
     user_message = (
         f"BRIEF: {brief}\n\n"
-        f"Based on the brief above, generate exactly {subtopic_count} subtopics "
-        f"that comprehensively cover the key arguments and themes described. "
-        f"For each subtopic, provide a title, angle, research_info, and search_query "
-        f"as specified in the output schema.\n\n"
-        f"Remember: each section must make an argument and back it up with evidence. "
-        f"Choose the type of evidence that best supports the claim — data, journalism, "
-        f"historical examples, expert analysis, personal accounts, whatever fits. "
+        f"Generate exactly {subtopic_count} subtopics that comprehensively cover "
+        f"the key arguments in the brief above. For each subtopic, provide a title, "
+        f"angle, research_info, and search_query as specified in the output schema.\n\n"
+        f"The SEARCH QUERY is the most important field. It will be used by a research "
+        f"agent with Google Search to find evidence that proves your angle. Start each "
+        f"query from an observable phenomenon or contradiction (something anyone can see) "
+        f"and search for its hidden explanation. Include specific company names and "
+        f"investigative terms. Make sure these queries would actually surface the kind "
+        f"of evidence described in research_info.\n\n"
         f"Return ONLY valid JSON."
     )
 
@@ -997,10 +999,9 @@ STEP2_DEFAULT_PARAMS = {
         "- The mechanics: HOW does the system actually work? What are the incentives? "
         "Who benefits and who pays?\n\n"
         "WHAT WE DO NOT WANT:\n"
-        "- Statistics or survey percentages presented as the main finding ('21% of employees report burnout' — "
-        "that's not a revelation, it's filler). Hard numbers are fine when they're evidence for a larger point "
-        "('Walmart saved $12M in labor costs the same year its CEO got a $22M bonus'), but they should not be "
-        "the headline — the headline is the decision, the mechanism, the deliberate choice the numbers reveal.\n"
+        "- Statistics or percentages as the main story ('21% of employees report burnout' — so what?). "
+        "Numbers are fine as supporting evidence ('Walmart cut $12M in labor while the CEO got $22M'), "
+        "but the headline should be the decision, the mechanism, the deliberate choice — not the stat.\n"
         "- Academic abstractions ('research suggests a correlation between staffing and satisfaction' — useless)\n"
         "- Both-sides equivocation ('however, some argue...' — no)\n"
         "- Vague generalizations ('many companies struggle with...' — which companies?)\n\n"
