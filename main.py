@@ -1140,8 +1140,27 @@ async def run_step2_topic(topic_id: int):
     results = step2_data.get("research_results", [])
 
     idx = _find_result_index_by_topic_id(results, topic_id)
+
+    # Auto-create the result entry if it doesn't exist yet
     if idx is None:
-        return {"ok": False, "error": f"Topic ID {topic_id} not found in research results."}
+        step1_data = get_step1_data()
+        subtopics = step1_data.get("subtopics", [])
+        st = next((s for s in subtopics if s.get("id") == topic_id), None)
+        if st is None:
+            log_entry("ERROR", 2, f"Topic ID {topic_id} not found in Step 1 subtopics either")
+            return {"ok": False, "error": f"Topic ID {topic_id} not found in Step 1 or Step 2."}
+        # Create new result entry from Step 1 subtopic
+        results.append({
+            "topic_id": topic_id,
+            "research_summary": "",
+            "sources": [],
+            "status": "idle",
+            "error": None,
+            "last_run": None,
+        })
+        idx = len(results) - 1
+        step2_data["research_results"] = results
+        log_entry("INFO", 2, f"Auto-created research entry for topic #{topic_id}")
 
     step2_data["status"] = "running"
     results[idx]["status"] = "running"
