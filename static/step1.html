@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Step 1: Subtopic Planning — ArtGen</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <nav id="sidebar">
+            <h1>⚡ ArtGen</h1>
+            <div class="project-name" id="sidebar-project-name">No project</div>
+            <div class="nav-section">Pipeline</div>
+            <a href="/"><span class="step-dot" id="dot-step0"></span>0. Project</a>
+            <a href="/step/1" class="active step-link"><span class="step-dot idle" id="dot-step1"></span>1. Subtopic Planning</a>
+            <a href="/step/2" class="step-link"><span class="step-dot idle" id="dot-step2"></span>2. Subtopic Research</a>
+            <a href="/step/3" class="step-link"><span class="step-dot idle" id="dot-step3"></span>3. Article Draft</a>
+            <a href="/step/4" class="step-link"><span class="step-dot idle" id="dot-step4"></span>4. Style Rewrite</a>
+            <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Images</a>
+            <div class="nav-section">System</div>
+            <a href="/settings">⚙ Settings</a>
+            <a href="/log">📋 System Log</a>
+        </nav>
+
+        <div id="main">
+            <div id="content">
+                <div class="page-header">
+                    <h1>Step 1: Subtopic Planning</h1>
+                    <p>Write a brief, configure your model, review the full prompt, then generate your article outline</p>
+                </div>
+
+                <!-- Brief Input -->
+                <div class="card">
+                    <h2>Brief</h2>
+                    <div class="form-group">
+                        <label for="step1-topic">What do you want the article to cover?</label>
+                        <textarea id="step1-topic" rows="4" placeholder="Write a brief description of the article topic...&#10;&#10;e.g., A deep dive into the history of space exploration, covering the Cold War space race, the Apollo program, modern private space companies like SpaceX, and what the future of human space travel might look like."></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="step1-count">Number of Subtopics</label>
+                            <input type="number" id="step1-count" value="5" min="1" max="20">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Parameters Card -->
+                <div class="card">
+                    <h2>⚙ Model & Parameters</h2>
+                    <div class="form-group">
+                        <label for="step1-model">Model</label>
+                        <select id="step1-model"></select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="step1-temperature">Temperature: <span id="temp-value">1.0</span></label>
+                            <input type="range" id="step1-temperature" min="0" max="1" step="0.1" value="1.0">
+                        </div>
+                        <div class="form-group">
+                            <label for="step1-max-tokens">Max Tokens</label>
+                            <input type="number" id="step1-max-tokens" value="4096" min="100" max="128000">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="step1-system-prompt">System Prompt</label>
+                        <textarea id="step1-system-prompt" rows="8"></textarea>
+                    </div>
+                    <button id="step1-save-params-btn" class="secondary">Save Parameters</button>
+                    <span id="step1-params-status"></span>
+                </div>
+
+                <!-- Prompt Preview -->
+                <div class="card" id="step1-preview-card" style="display:none;">
+                    <h2>📝 Prompt Preview</h2>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;">This is exactly what will be sent to the model. System prompt and user message are separate parameters. Review before generating.</p>
+                    <pre id="step1-preview" style="background:var(--bg); padding:16px; border-radius:var(--radius); font-family:var(--mono); font-size:12px; white-space:pre-wrap; overflow-x:auto; max-height:400px; overflow-y:auto; color:var(--text); line-height:1.5;"></pre>
+                    <button id="step1-run-btn" style="margin-top:12px;">🚀 Generate Subtopics</button>
+                    <span id="step1-run-status"></span>
+                </div>
+
+                <div id="step1-error" style="display:none;"></div>
+
+                <!-- Output Card -->
+                <div class="card" id="step1-output-card">
+                    <h2>Generated Subtopics</h2>
+                    <div id="step1-output">
+                        <p style="color:var(--text-secondary)">Write a brief and click "Generate Subtopics" to get started.</p>
+                    </div>
+                </div>
+            </div>
+            <div id="log-widget-header">
+                <span><button id="toggle-log-btn" class="toggle-log-btn">▶ Show</button> System Log</span>
+                <a href="/log">View Full Log →</a>
+            </div>
+            <div id="log-widget"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/sidebar.js"></script>
+    <script src="/static/js/log.js"></script>
+    <script src="/static/js/step1.js"></script>
+</body>
+</html>

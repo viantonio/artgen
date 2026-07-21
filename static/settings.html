@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings — ArtGen</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <nav id="sidebar">
+            <h1>⚡ ArtGen</h1>
+            <div class="project-name" id="sidebar-project-name">Settings</div>
+            <div class="nav-section">Pipeline</div>
+            <a href="/"><span class="step-dot" id="dot-step0"></span>0. Project</a>
+            <a href="/step/1" class="step-link"><span class="step-dot idle" id="dot-step1"></span>1. Subtopic Planning</a>
+            <a href="/step/2" class="step-link"><span class="step-dot idle" id="dot-step2"></span>2. Subtopic Research</a>
+            <a href="/step/3" class="step-link"><span class="step-dot idle" id="dot-step3"></span>3. Article Draft</a>
+            <a href="/step/4" class="step-link"><span class="step-dot idle" id="dot-step4"></span>4. Style Rewrite</a>
+            <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Images</a>
+            <div class="nav-section">System</div>
+            <a href="/settings" class="active">⚙ Settings</a>
+            <a href="/log">📋 System Log</a>
+        </nav>
+
+        <div id="main">
+            <div id="content">
+                <div class="page-header">
+                    <h1>⚙ Settings</h1>
+                    <p>Configure API keys for Anthropic and Gemini</p>
+                </div>
+
+                <div class="card">
+                    <h2>Anthropic API Key</h2>
+                    <div class="form-group">
+                        <label for="anthropic-key">API Key</label>
+                        <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button id="save-anthropic-btn">Save Key</button>
+                        <button id="validate-anthropic-btn" class="secondary">Validate</button>
+                        <span id="anthropic-status"></span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Gemini API Key</h2>
+                    <div class="form-group">
+                        <label for="gemini-key">API Key</label>
+                        <input type="password" id="gemini-key" placeholder="AIza...">
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button id="save-gemini-btn">Save Key</button>
+                        <button id="validate-gemini-btn" class="secondary">Validate</button>
+                        <span id="gemini-status"></span>
+                    </div>
+                </div>
+
+                <div class="card" style="border:1px solid var(--error);">
+                    <h2 style="color:var(--error);">⚠ Danger Zone</h2>
+                    <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">
+                        This will permanently delete all projects, step data, logs, and settings.
+                        API keys will also be cleared. This cannot be undone.
+                    </p>
+                    <button id="reset-all-btn" style="background:var(--error); border-color:var(--error); color:#fff;">🗑 Reset All Data</button>
+                    <span id="reset-status"></span>
+                </div>
+            </div>
+            <div id="log-widget-header">
+                <span><button id="toggle-log-btn" class="toggle-log-btn">▶ Show</button> System Log</span>
+                <a href="/log">View Full Log →</a>
+            </div>
+            <div id="log-widget"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/sidebar.js"></script>
+    <script src="/static/js/log.js"></script>
+    <script src="/static/js/settings.js"></script>
+</body>
+</html>

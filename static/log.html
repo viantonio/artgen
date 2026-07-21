@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Log — ArtGen</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <nav id="sidebar">
+            <h1>⚡ ArtGen</h1>
+            <div class="project-name" id="sidebar-project-name">Log</div>
+            <div class="nav-section">Pipeline</div>
+            <a href="/"><span class="step-dot" id="dot-step0"></span>0. Project</a>
+            <a href="/step/1" class="step-link"><span class="step-dot idle" id="dot-step1"></span>1. Subtopic Planning</a>
+            <a href="/step/2" class="step-link"><span class="step-dot idle" id="dot-step2"></span>2. Subtopic Research</a>
+            <a href="/step/3" class="step-link"><span class="step-dot idle" id="dot-step3"></span>3. Article Draft</a>
+            <a href="/step/4" class="step-link"><span class="step-dot idle" id="dot-step4"></span>4. Style Rewrite</a>
+            <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Images</a>
+            <div class="nav-section">System</div>
+            <a href="/settings">⚙ Settings</a>
+            <a href="/log" class="active">📋 System Log</a>
+        </nav>
+
+        <div id="main">
+            <div id="content">
+                <div class="page-header">
+                    <h1>📋 System Log</h1>
+                    <p>All pipeline activity and errors</p>
+                </div>
+
+                <div class="card" style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:16px;">
+                    <button id="refresh-log-btn" class="secondary">Refresh</button>
+                    <button id="clear-log-display-btn" class="secondary">Clear Display</button>
+                </div>
+
+                <div class="card">
+                    <div id="full-log" style="font-family: var(--mono); font-size: 12px; max-height: 600px; overflow-y: auto;"></div>
+                </div>
+            </div>
+            <div id="log-widget-header">
+                <span><button id="toggle-log-btn" class="toggle-log-btn">▶ Show</button> System Log</span>
+                <a href="/log">View Full Log →</a>
+            </div>
+            <div id="log-widget"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/sidebar.js"></script>
+    <script src="/static/js/log.js"></script>
+    <script>
+        const logContainer = document.getElementById('full-log');
+
+        async function loadFullLog() {
+            try {
+                const data = await API.get('/api/log');
+                const entries = data.entries || [];
+                logContainer.innerHTML = entries.map(e => {
+                    const ts = e.timestamp || '';
+                    return `<div class="log-entry ${e.level}"><span class="ts">${ts}</span>[${e.level}] Step ${e.step}: ${e.message}</div>`;
+                }).join('');
+            } catch (e) {
+                logContainer.innerHTML = `<div class="error-box">Failed to load log: ${e.message}</div>`;
+            }
+        }
+
+        document.getElementById('refresh-log-btn').addEventListener('click', loadFullLog);
+        document.getElementById('clear-log-display-btn').addEventListener('click', () => {
+            logContainer.innerHTML = '';
+        });
+
+        loadFullLog();
+    </script>
+</body>
+</html>

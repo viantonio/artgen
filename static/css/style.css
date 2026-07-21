@@ -1,0 +1,346 @@
+/* === Reset & Base === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222636;
+    --border: #2d3148;
+    --text: #e1e4ed;
+    --text-secondary: #8b8fa7;
+    --accent: #6c8cff;
+    --accent-hover: #8ba4ff;
+    --success: #4ade80;
+    --error: #f87171;
+    --warning: #fbbf24;
+    --sidebar-width: 240px;
+    --log-height: 80px;
+    --radius: 8px;
+    --font: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    --mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* === Layout === */
+#app { display: flex; height: 100vh; }
+
+/* === Sidebar === */
+#sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    gap: 4px;
+    overflow-y: auto;
+}
+
+#sidebar h1 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 12px;
+    letter-spacing: -0.3px;
+}
+
+#sidebar .project-name {
+    font-size: 13px;
+    color: var(--text-secondary);
+    padding: 8px 12px;
+    background: var(--surface2);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#sidebar a, #sidebar button.nav-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: background 0.15s, color 0.15s;
+}
+
+#sidebar a:hover, #sidebar button.nav-btn:hover,
+#sidebar a.active, #sidebar button.nav-btn.active {
+    background: var(--surface2);
+    color: var(--text);
+}
+
+#sidebar a.active, #sidebar button.nav-btn.active {
+    color: var(--accent);
+}
+
+#sidebar a.gated {
+    opacity: 0.35;
+    pointer-events: auto;
+    cursor: not-allowed;
+}
+
+#sidebar .nav-section {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    padding: 12px 12px 4px;
+    opacity: 0.6;
+}
+
+/* === Main Content === */
+#main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px;
+    max-width: 900px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* === Bottom Log Widget === */
+#log-widget {
+    height: var(--log-height);
+    min-height: var(--log-height);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
+    overflow-y: auto;
+    padding: 8px 16px;
+    color: var(--text-secondary);
+    display: none;
+}
+
+#log-widget.expanded { display: block; }
+
+#log-widget .log-entry { padding: 2px 0; border-bottom: 1px solid var(--border); }
+#log-widget .log-entry .ts { color: var(--text-secondary); opacity: 0.6; margin-right: 8px; }
+#log-widget .log-entry.ERROR { color: var(--error); }
+#log-widget .log-entry.WARN { color: var(--warning); }
+
+#log-widget-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 16px;
+    background: var(--surface2);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+#log-widget-header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+#log-widget-header button.toggle-log-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 8px;
+}
+#log-widget-header button.toggle-log-btn:hover { color: var(--text); border-color: var(--accent); }
+
+/* === Form Elements === */
+label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+textarea,
+select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    transition: border-color 0.15s;
+}
+
+input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+select {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3e%3cpath fill='%238b8fa7' d='M6 8L1 3h10z'/%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 100px;
+    font-family: var(--font);
+}
+
+button {
+    padding: 8px 20px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+button:hover { background: var(--accent-hover); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+button.secondary:hover { background: var(--border); }
+button.danger { background: var(--error); }
+
+/* === Cards & Panels === */
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.card h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text);
+}
+
+/* === Form Groups === */
+.form-group { margin-bottom: 16px; }
+.form-row { display: flex; gap: 12px; }
+.form-row > * { flex: 1; }
+
+/* === Status Badges === */
+.status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.status.idle { background: var(--surface2); color: var(--text-secondary); }
+.status.running { background: rgba(108, 140, 255, 0.15); color: var(--accent); }
+.status.completed { background: rgba(74, 222, 128, 0.15); color: var(--success); }
+.status.failed { background: rgba(248, 113, 113, 0.15); color: var(--error); }
+
+/* === Subtopic List === */
+.subtopic-list { list-style: none; }
+.subtopic-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface2);
+    border-radius: 6px;
+    margin-bottom: 6px;
+}
+.subtopic-list li .num {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 13px;
+    min-width: 24px;
+}
+.subtopic-list li input { flex: 1; }
+
+/* === Error & Success === */
+.error-box {
+    background: rgba(248, 113, 113, 0.1);
+    border: 1px solid var(--error);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    color: var(--error);
+    font-size: 13px;
+    margin: 12px 0;
+}
+
+.success-box {
+    background: rgba(74, 222, 128, 0.1);
+    border: 1px solid var(--success);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    color: var(--success);
+    font-size: 13px;
+    margin: 12px 0;
+}
+
+/* === Spinner === */
+.spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* === Page headers === */
+.page-header { margin-bottom: 24px; }
+.page-header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.page-header p { color: var(--text-secondary); font-size: 14px; }
+
+/* === Sidebar step status dots === */
+.step-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+.step-dot.idle { background: var(--border); }
+.step-dot.running { background: var(--accent); }
+.step-dot.completed { background: var(--success); }
+.step-dot.failed { background: var(--error); }
+
+/* === Range input === */
+input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+}
