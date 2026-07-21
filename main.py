@@ -978,18 +978,15 @@ def _parse_subtopics_fallback(text: str, count: int) -> list[dict] | None:
 STEP2_DEFAULT_PARAMS = {
     "model": "gemini-2.5-flash-lite",
     "temperature": 0.7,
-    "max_tokens": 8192,
+    "max_tokens": 4096,
     "system_prompt": (
-        "You are a research agent. You will be given a specific argument to back up. "
-        "You MUST use Google Search to find evidence. Do NOT rely on your training data — "
-        "everything you write must be grounded in actual search results.\n\n"
-        "Your job is to document the facts as they fit the argument. Go beyond the "
-        "obvious surface-level data. Dig into the observable reality: what is actually "
-        "happening, why it is happening, what it reveals. Look for the mechanics, the "
-        "decisions, the incentives, the cascading effects.\n\n"
-        "Before writing anything, search for multiple angles of the topic. Only write "
-        "your research brief AFTER you have search results. Cite sources naturally "
-        "where you reference specific facts."
+        "You are a research agent. You will be given a specific argument to prove. "
+        "You MUST use Google Search to find evidence. Everything you write must "
+        "come from search results, not your training data.\n\n"
+        "Keep it CONCISE. This is a research brief — facts and evidence only, "
+        "no filler. Each sentence should cite a source. Focus on proving the "
+        "argument with hard evidence: specific cases, documented incidents, "
+        "data points, expert analysis, investigative findings."
     ),
 }
 
@@ -1260,11 +1257,10 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
         f"WHAT TO DIG FOR: {st_fields.get('research_info', '')}\n"
         f"SEARCH: {st_fields.get('search_query', '')}\n"
         f"TITLE: {st_fields.get('title', '')}\n\n"
-        "CRITICAL: You MUST use Google Search right now to research this topic. "
-        "Do not answer from your training data. Execute the search, review the results, "
-        "then write a factual research brief grounded in what you found. "
-        "Search multiple angles — dig deeper than the first result. "
-        "Cite your sources where you reference specific facts."
+        "CRITICAL: Use Google Search now. Find the evidence described above. "
+        "Keep it CONCISE — 3-5 paragraphs max. Each sentence should prove the "
+        "argument with a fact from your search results. No filler, no background, "
+        "no academic summaries. Just evidence."
     )
 
     # Log the full prompt being sent so the user can inspect it
