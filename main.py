@@ -633,7 +633,7 @@ STEP1_DEFAULT_PARAMS = {
         '      "title": "A sharp, clickable section headline that makes someone want to read it",\n'
         '      "angle": "The argument this section makes — what claim are we advancing? what should the reader be convinced of by the end of this section?",\n'
         '      "research_info": "The kind of evidence that would best support this argument: specific data points, historical examples, expert opinions, case studies, legal rulings, personal accounts, institutional patterns — whatever form of proof makes the argument land hardest",\n'
-        '      "search_query": "THE MOST CRITICAL FIELD. This query drives all downstream research. Start from an OBSERVABLE phenomenon or contradiction — something anyone can see — and search for its hidden explanation. Good queries investigate WHY: \'why are store checkout lanes always empty understaffing profit\' or \'retail stores locking merchandise behind glass labor shortage\'. They connect visible symptoms to hidden causes. Include specific company names and industry terms. BAD queries just list abstract concepts: \'retail understaffing profit strategy\'. GOOD queries hunt for the story behind what people see in the real world: \'Walmart fewer cashiers more profit self-checkout labor cost savings\'. Think like a journalist who noticed something wrong and is searching for who did it, why, and who documented it."\n'
+        '      "search_query": "THE MOST CRITICAL FIELD. This query will be used with Google Search to research this subtopic. Craft a creative, effective search that would surface the kind of evidence needed to prove the angle. Start from the observable reality described in the angle — what would someone actually search to understand WHY this happens? Make it a search that makes sense, not a keyword dump. Think about what terms would surface investigative journalism, deep analysis, documented cases, financial reporting, or expert commentary — whatever best fits the evidence this argument needs. Be specific enough to find real results, broad enough to cast a wide net."\n'
         "    }\n"
         "  ]\n"
         "}\n\n"
@@ -642,7 +642,7 @@ STEP1_DEFAULT_PARAMS = {
         "- Titles should sound like something you'd click on. No academic paper titles.\n"
         "- Angles must be arguable. Not \"an overview of X\" — more like \"here's why X is actually Y\" or \"the case for X.\" If nobody could disagree with it, the angle isn't sharp enough.\n"
         "- Research info should be specific about what kind of evidence the argument needs. Don't just say \"find sources\" — say what kind of sources and what they should demonstrate.\n"
-        "- Search queries are THE critical output — Step 2’s entire research quality depends on them. Each query should start from an OBSERVABLE (something anyone can see: empty checkout lanes, locked-up merchandise, stores making record profit with half the staff) and search for the HIDDEN EXPLANATION behind it. Investigate the contradiction. Ask “why does this happen?” and “who benefits?” through your search terms. Craft queries that surface investigative journalism, deep analysis, and documented cases — not academic abstracts. A bad query reads like keywords in Google Scholar, a good one reads like a journalist who noticed something wrong and is hunting for the story behind it. The search terms to use: 'leaked', 'whistleblower', 'internal memo', 'exposé', 'lawsuit', 'deposition', 'class action', 'former employee reveals', 'documents show', 'investigation found'. Include specific company names, people, or events. The query should sound like a journalist tracking down a story — a bad query sounds like a PhD student on Google Scholar, a good one sounds like someone trying to find the receipts.\n"
+        "- Search queries are THE critical output — Step 2’s entire research quality depends on them. Craft a creative, effective Google search for each subtopic. Start from the observable reality in the angle and search for evidence that proves it. Do not just stuff keywords together — think about what an intelligent person would actually type into Google to find deep analysis, investigative reporting, documented cases, or expert commentary on this specific argument. Be specific enough to surface real results, broad enough to not miss unexpected angles. The query should make sense as a search, not read like a list of concepts.\n"
         "- Cover the brief completely. The full set of subtopics should leave no major aspect of the brief unexplored.\n"
         "- Order matters. Arrange subtopics in the sequence they should appear in the finished article: open strong, build momentum, end memorably.\n\n"
         "Return ONLY the JSON object, no preamble, no commentary."
@@ -804,11 +804,12 @@ async def run_step1():
         f"the key arguments in the brief above. For each subtopic, provide a title, "
         f"angle, research_info, and search_query as specified in the output schema.\n\n"
         f"The SEARCH QUERY is the most important field. It will be used by a research "
-        f"agent with Google Search to find evidence that proves your angle. Start each "
-        f"query from an observable phenomenon or contradiction (something anyone can see) "
-        f"and search for its hidden explanation. Include specific company names and "
-        f"investigative terms. Make sure these queries would actually surface the kind "
-        f"of evidence described in research_info.\n\n"
+        f"agent with Google Search to find evidence that proves your angle. Craft each "
+        f"query as a creative, effective Google search — think about what an intelligent "
+        f"person would actually type in to find deep analysis, investigative reporting, "
+        f"or documented cases on this specific argument. Make it a search that makes sense, "
+        f"not a keyword dump. Be specific enough to surface real results, broad enough to "
+        f"catch unexpected angles.\n\n"
         f"Return ONLY valid JSON."
     )
 
@@ -1282,10 +1283,9 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
         f"SEARCH: {st_fields.get('search_query', '')}\n"
         f"TITLE: {st_fields.get('title', '')}\n\n"
         "Prove the argument above with specific, concrete evidence. "
-        "No statistics. No percentages. No academic abstractions. "
-        "Find named companies, documented decisions, internal logic, "
-        "cascading consequences, whistleblower accounts, lawsuits, "
-        "leaked documents — the stuff that shows HOW this actually works. "
+        "Dig into the observable reality — what's actually happening, "
+        "why it's happening, and what it reveals. Use Google Search "
+        "to find the best sources that explain HOW this works. "
         "Return ONLY the JSON object."
     )
 
