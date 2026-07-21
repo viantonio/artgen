@@ -978,24 +978,25 @@ def _parse_subtopics_fallback(text: str, count: int) -> list[dict] | None:
 # User message suffix appended to Step 1 fields — single source of truth
 STEP2_USER_MESSAGE_SUFFIX = (
     "CRITICAL: Use Google Search now. Find the evidence described above. "
-    "Keep it CONCISE — 3-5 paragraphs max. Each sentence should prove the "
-    "argument with a fact from your search results. No filler, no background, "
-    "no academic summaries. Just evidence."
+    "200 WORDS MAX. Bullet-style evidence, not prose. One fact per line. "
+    "Each line must cite a source. No filler, no background, no introductions."
 )
 
 STEP2_DEFAULT_PARAMS = {
     "model": "gemini-2.5-flash-lite",
     "temperature": 0.7,
-    "max_tokens": 4096,
+    "max_tokens": 1500,
     "system_prompt": (
         "You are a research agent. You will be given a specific argument to prove. "
         "You MUST use Google Search to find evidence. Everything you write must "
         "come from search results, not your training data.\n\n"
-        "Keep it CONCISE. This is a research brief — facts and evidence only, "
-        "no filler. Each sentence should cite a source. Focus on proving the "
+        "DO NOT WRITE A PAPER. You have a strict 200-word limit. "
+        "Write bullet-style evidence, not prose. One fact per line. "
+        "Every line must cite a source. Focus on proving the "
         "argument with hard evidence: specific cases, documented incidents, "
         "data points, expert analysis, investigative findings."
     ),
+}
 }
 
 STEP2_MODELS = [
