@@ -1324,18 +1324,41 @@ async def _call_gemini(
                 content = candidates[0].get("content", {})
                 parts = content.get("parts", [])
 
-                # Extract text and url_citation annotations from all parts
+                # Extract text from parts
                 response_text = ""
-                sources = []
                 for part in parts:
                     if "text" in part:
                         response_text += part["text"]
+
+                # Extract sources from TWO places:
+                # 1. Inline url_citation annotations on parts (Interactions API format)
+                # 2. groundingMetadata.groundingChunks (generateContent API format)
+                sources = []
+                seen_urls = set()
+
+                # Format 1: Inline annotations on parts
+                for part in parts:
                     for ann in part.get("annotations", []):
                         if ann.get("type") == "url_citation":
-                            sources.append({
-                                "url": ann.get("url", ""),
-                                "title": ann.get("title", ""),
-                            })
+                            url = ann.get("url", "").strip()
+                            if url and url not in seen_urls:
+                                seen_urls.add(url)
+                                sources.append({
+                                    "url": url,
+                                    "title": ann.get("title", ""),
+                                })
+
+                # Format 2: groundingMetadata (generateContent API)
+                grounding = candidates[0].get("groundingMetadata", {})
+                for chunk in grounding.get("groundingChunks", []):
+                    web = chunk.get("web", {})
+                    url = web.get("uri", "").strip()
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        sources.append({
+                            "url": url,
+                            "title": web.get("title", ""),
+                        })
 
                 # Parse JSON from response
                 parsed = _parse_gemini_json(response_text)
@@ -1344,6 +1367,11 @@ async def _call_gemini(
                     result["research_summary"] = parsed["research_summary"]
                     result["sources"] = sources
                     save_step2_data(step2_data)
+                    log_entry("INFO", 2, (
+                        f"Subtopic #{result.get('topic_id')} — "
+                        f"summary {len(parsed['research_summary'])} chars, "
+                        f"{len(sources)} sources"
+                    ))
                     return True
                 else:
                     result["status"] = "failed"
@@ -1351,6 +1379,16 @@ async def _call_gemini(
                         f"Failed to parse Gemini response as JSON (attempt {attempt}). "
                         f"Raw: {response_text[:300]}"
                     )
+                    # Log response structure for debugging
+                    candidate_keys = list(candidates[0].keys())
+                    has_grounding = "groundingMetadata" in candidates[0]
+                    log_entry("WARN", 2, (
+                        f"Subtopic #{result.get('topic_id')} — JSON parse failed. "
+                        f"Candidate keys: {candidate_keys}, "
+                        f"Has groundingMetadata: {has_grounding}, "
+                        f"Parts count: {len(parts)}, "
+                        f"Sources found: {len(sources)}"
+                    ))
                     save_step2_data(step2_data)
                     return False
 
