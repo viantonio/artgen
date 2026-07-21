@@ -987,11 +987,8 @@ STEP2_DEFAULT_PARAMS = {
         "obvious surface-level data. Dig into the observable reality: what is actually "
         "happening, why it is happening, what it reveals. Look for the mechanics, the "
         "decisions, the incentives, the cascading effects.\n\n"
-        "Return ONLY a valid JSON object with the research summary AND the sources you used:\n"
-        '{"research_summary": "Your research findings here...", '
-        '"sources": [{"url": "https://...", "title": "Source title"}]}\n\n'
-        "Include every source you actually used. If you did not use any sources, return an empty array. "
-        "No preamble, no markdown fences, no extra fields."
+        "Write your research findings directly as a well-structured brief. "
+        "Cite sources naturally inline where you reference them."
     ),
 }
 
@@ -1264,7 +1261,7 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
         f"TITLE: {st_fields.get('title', '')}\n\n"
         "Research this argument using Google Search. Document the facts "
         "as they fit the argument. Go beyond the obvious. "
-        "Return the JSON object with your research summary and sources."
+        "Write your findings as a clear research brief with sources cited."
     )
 
     # Log the full prompt being sent so the user can inspect it
@@ -1325,13 +1322,13 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
     log_entry("INFO", 2, f"Researching subtopic #{result.get('topic_id')} with {model}")
 
     # Attempt 1
-    success = await _call_gemini(step2_data, idx, endpoint, headers, request_body, attempt=1)
+    success = await _call_gemini(step2_data, idx, endpoint, headers, request_body, attempt=1, is_gemini3=is_gemini3)
 
     # Retry after 3s delay on failure
     if not success:
         log_entry("WARN", 2, f"Subtopic #{result.get('topic_id')} failed attempt 1. Retrying in 3s...")
         await asyncio.sleep(3)
-        success = await _call_gemini(step2_data, idx, endpoint, headers, request_body, attempt=2)
+        success = await _call_gemini(step2_data, idx, endpoint, headers, request_body, attempt=2, is_gemini3=is_gemini3)
 
     if success:
         result["status"] = "completed"
@@ -1342,7 +1339,7 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
 
 async def _call_gemini(
     step2_data: dict, idx: int, endpoint: str, headers: dict,
-    request_body: dict, attempt: int,
+    request_body: dict, attempt: int, is_gemini3: bool = False,
 ) -> bool:
     """Make a single Gemini API call. Returns True on success, False on failure."""
     import httpx
@@ -1365,15 +1362,22 @@ async def _call_gemini(
                 content = candidates[0].get("content", {})
                 parts = content.get("parts", [])
 
-                # Extract text from parts
+                # Extract text from parts — check both "text" key and direct string values
                 response_text = ""
                 for part in parts:
                     if "text" in part:
                         response_text += part["text"]
+                    elif isinstance(part, str):
+                        response_text += part
 
-                # Extract sources from TWO places:
-                # 1. Inline url_citation annotations on parts (Interactions API format)
-                # 2. groundingMetadata.groundingChunks (generateContent API format)
+                # If still no text, try top-level text field on content
+                if not response_text:
+                    response_text = content.get("text", "")
+
+                # Extract sources from THREE places:
+                # 1. Inline url_citation annotations on parts
+                # 2. groundingMetadata.groundingChunks (generateContent API)
+                # 3. groundingMetadata.groundingSupports
                 sources = []
                 seen_urls = set()
 
@@ -1389,7 +1393,7 @@ async def _call_gemini(
                                     "title": ann.get("title", ""),
                                 })
 
-                # Format 2: groundingMetadata (generateContent API)
+                # Format 2: groundingMetadata.groundingChunks
                 grounding = candidates[0].get("groundingMetadata", {})
                 for chunk in grounding.get("groundingChunks", []):
                     web = chunk.get("web", {})
@@ -1401,48 +1405,68 @@ async def _call_gemini(
                             "title": web.get("title", ""),
                         })
 
-                # Parse JSON from response
-                parsed = _parse_gemini_json(response_text)
+                # Format 3: groundingMetadata.groundingSupports
+                for gs in grounding.get("groundingSupports", []):
+                    for seg in gs.get("segment", []):
+                        # segment might contain citation info
+                        pass
 
-                if parsed and "research_summary" in parsed:
-                    result["research_summary"] = parsed["research_summary"]
-
-                    # Format 3: sources from the model's JSON output
-                    for s in parsed.get("sources", []):
-                        url = (s.get("url") or "").strip()
-                        if url and url not in seen_urls:
-                            seen_urls.add(url)
-                            sources.append({
-                                "url": url,
-                                "title": s.get("title", ""),
-                            })
-
+                # Always save sources from grounding metadata
+                if sources:
                     result["sources"] = sources
+
+                # For Gemini 3+ with responseFormat, try JSON parse first
+                # For 2.5 models (no responseFormat), use raw text directly
+                if is_gemini3:
+                    parsed = _parse_gemini_json(response_text)
+                    if parsed and "research_summary" in parsed:
+                        result["research_summary"] = parsed["research_summary"]
+                        for s in parsed.get("sources", []):
+                            url = (s.get("url") or "").strip()
+                            if url and url not in seen_urls:
+                                seen_urls.add(url)
+                                sources.append({"url": url, "title": s.get("title", "")})
+                        result["sources"] = sources
+                        save_step2_data(step2_data)
+                        log_entry("INFO", 2, (
+                            f"Subtopic #{result.get('topic_id')} — "
+                            f"summary {len(parsed['research_summary'])} chars, "
+                            f"{len(sources)} sources"
+                        ))
+                        return True
+                    # Fall through to use raw text if JSON parse fails
+
+                # 2.5 models or JSON parse failed: use raw response text as research_summary
+                if response_text.strip():
+                    result["research_summary"] = response_text.strip()
+                    result["sources"] = sources
+                    result["status"] = "completed"
                     save_step2_data(step2_data)
                     log_entry("INFO", 2, (
                         f"Subtopic #{result.get('topic_id')} — "
-                        f"summary {len(parsed['research_summary'])} chars, "
-                        f"{len(sources)} sources"
+                        f"summary {len(response_text)} chars (raw text), "
+                        f"{len(sources)} sources from grounding/annotations, "
+                        f"grounding_metadata_keys={list(grounding.keys())}, "
+                        f"parts_annotated={sum(1 for p in parts if p.get('annotations'))}"
                     ))
                     return True
-                else:
-                    result["status"] = "failed"
-                    result["error"] = (
-                        f"Failed to parse Gemini response as JSON (attempt {attempt}). "
-                        f"Raw: {response_text[:300]}"
-                    )
-                    # Log response structure for debugging
-                    candidate_keys = list(candidates[0].keys())
-                    has_grounding = "groundingMetadata" in candidates[0]
-                    log_entry("WARN", 2, (
-                        f"Subtopic #{result.get('topic_id')} — JSON parse failed. "
-                        f"Candidate keys: {candidate_keys}, "
-                        f"Has groundingMetadata: {has_grounding}, "
-                        f"Parts count: {len(parts)}, "
-                        f"Sources found: {len(sources)}"
-                    ))
-                    save_step2_data(step2_data)
-                    return False
+
+                # No text at all — model generated nothing
+                result["status"] = "failed"
+                result["error"] = (
+                    f"Gemini returned no text (attempt {attempt}). "
+                    f"Parts: {len(parts)}, grounding chunks: {len(sources)}"
+                )
+                # Save sources even on failure
+                save_step2_data(step2_data)
+                log_entry("ERROR", 2, (
+                    f"Subtopic #{result.get('topic_id')} — empty response (attempt {attempt}). "
+                    f"parts_count={len(parts)}, "
+                    f"content_keys={list(content.keys())}, "
+                    f"candidate_keys={list(candidates[0].keys())}, "
+                    f"sources_from_grounding={len(sources)}"
+                ))
+                return False
 
             else:
                 error_detail = _extract_gemini_error(resp)
