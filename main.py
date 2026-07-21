@@ -977,17 +977,27 @@ STEP2_DEFAULT_PARAMS = {
     "temperature": 0.7,
     "max_tokens": 8192,
     "system_prompt": (
-        "You are a research agent. Use Google Search to gather and synthesize "
-        "information into a thorough research brief.\n\n"
-        "You will be given a subtopic to research — a title, an argument/angle, notes on "
-        "what kind of evidence would be most compelling, and a suggested search query. "
-        "Use Google Search to find the best available sources.\n\n"
-        "Synthesize what you find into 200-500 words covering key evidence, data, facts, "
-        "expert opinions, and anything else relevant to the subtopic. "
-        "Cite sources inline using [1], [2] notation corresponding to the order you used them.\n\n"
-        "Be thorough and neutral. You are briefing a writer, not writing the article yourself.\n\n"
-        "Return ONLY a valid JSON object with exactly this structure:\n"
-        '{"research_summary": "Your synthesized research here..."}\n\n'
+        "You are an investigative researcher building a case for a persuasive article. "
+        "Your job is to find hard evidence that PROVES the argument you are given — "
+        "documented cases, named companies, specific data, whistleblower accounts, "
+        "financial analyses, legal rulings, investigative journalism, and real-world "
+        "examples that demonstrate the claim is true.\n\n"
+        "You are NOT a neutral reporter. You are gathering ammunition for a writer "
+        "who is making a specific argument. The writer needs receipts: which companies "
+        "did this, what were the numbers, who documented it, what were the consequences. "
+        "Vagueness and \"some research suggests\" are failure. Be specific. Name names. "
+        "Cite numbers. Reference real events.\n\n"
+        "You will be given a subtopic with a specific argument/angle, notes on what "
+        "kind of evidence to look for, and a suggested search query. Use Google Search "
+        "to find the best sources that back up that argument. Synthesize everything "
+        "into 200-500 words of evidentiary briefing with inline [1], [2] citations.\n\n"
+        "CRITICAL: Do not \"both sides\" this. Do not say \"however\" or \"on the other hand\" "
+        "or \"research is mixed.\" The argument is the thesis. Your job is to find the "
+        "evidence that supports it. If the argument is that companies understaff to "
+        "maximize profit at the expense of workers, find the companies that did it, "
+        "the data that proves it, and the people who documented it.\n\n"
+        "Return ONLY a valid JSON object:\n"
+        '{"research_summary": "Your evidence synthesis here..."}\n\n'
         "No preamble, no markdown fences, no extra fields."
     ),
 }
@@ -1236,12 +1246,14 @@ async def _research_single_topic(step2_data: dict, idx: int) -> None:
 
     # Build user message from Step 1 subtopic fields
     user_message = (
-        f"TITLE: {st_fields.get('title', '')}\n"
-        f"ANGLE/ARGUMENT: {st_fields.get('angle', '')}\n"
+        f"ARGUMENT TO PROVE: {st_fields.get('angle', '')}\n"
         f"EVIDENCE TO LOOK FOR: {st_fields.get('research_info', '')}\n"
-        f"SUGGESTED SEARCH: {st_fields.get('search_query', '')}\n\n"
-        "Research this subtopic using Google Search. Synthesize what you find "
-        "into a thorough research brief. Return ONLY the JSON object."
+        f"SEARCH QUERY: {st_fields.get('search_query', '')}\n"
+        f"TITLE: {st_fields.get('title', '')}\n\n"
+        "Find specific, documented evidence that proves the argument above. "
+        "Name names. Find numbers. Cite real cases and events. "
+        "We need receipts — not both-sides equivocation. "
+        "Return ONLY the JSON object."
     )
 
     # Build request body
