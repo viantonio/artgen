@@ -171,7 +171,7 @@ async def validate_gemini():
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent",
                 headers={
                     "x-goog-api-key": api_key,
                     "content-type": "application/json",
@@ -968,6 +968,466 @@ def _parse_subtopics_fallback(text: str, count: int) -> list[dict] | None:
     elif len(subtopics) > 0:
         return [{"id": i + 1, "title": subtopics[i], "angle": "", "research_info": "", "search_query": ""} for i in range(len(subtopics))]
     return None
+
+
+# --- Step 2: Subtopic Research ---
+
+STEP2_DEFAULT_PARAMS = {
+    "model": "gemini-2.5-flash-lite",
+    "temperature": 0.7,
+    "max_tokens": 8192,
+    "system_prompt": (
+        "You are a research agent. Use Google Search to gather and synthesize "
+        "information into a thorough research brief.\n\n"
+        "You will be given a subtopic to research — a title, an argument/angle, notes on "
+        "what kind of evidence would be most compelling, and a suggested search query. "
+        "Use Google Search to find the best available sources.\n\n"
+        "Synthesize what you find into 200-500 words covering key evidence, data, facts, "
+        "expert opinions, and anything else relevant to the subtopic. "
+        "Cite sources inline using [1], [2] notation corresponding to the order you used them.\n\n"
+        "Be thorough and neutral. You are briefing a writer, not writing the article yourself.\n\n"
+        "Return ONLY a valid JSON object with exactly this structure:\n"
+        '{"research_summary": "Your synthesized research here..."}\n\n'
+        "No preamble, no markdown fences, no extra fields."
+    ),
+}
+
+STEP2_MODELS = [
+    {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash-Lite (Fastest/Cheapest)"},
+    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash (Balanced)"},
+    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro (Most Capable)"},
+    {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash-Lite"},
+    {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash (Best)"},
+]
+
+
+def get_step2_params() -> dict:
+    """Load Step 2 params from disk or return defaults."""
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step2_params.json"
+        if params_file.exists():
+            with open(params_file) as f:
+                return json.load(f)
+    return dict(STEP2_DEFAULT_PARAMS)
+
+
+def save_step2_params(params: dict) -> None:
+    """Persist Step 2 params to disk."""
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step2_params.json"
+        with open(params_file, "w") as f:
+            json.dump(params, f, indent=2)
+
+
+def get_step2_data() -> dict:
+    """Load Step 2 data from disk."""
+    global _current_project_path
+    if _current_project_path:
+        step_file = _current_project_path / "step2.json"
+        if step_file.exists():
+            with open(step_file) as f:
+                return json.load(f)
+    return {
+        "research_results": [], "status": "idle", "last_run": None, "error": None,
+    }
+
+
+def save_step2_data(data: dict) -> bool:
+    """Persist Step 2 data to disk. Returns False if no project is loaded."""
+    global _current_project_path
+    if not _current_project_path:
+        return False
+    step_file = _current_project_path / "step2.json"
+    with open(step_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return True
+
+
+class Step2DataUpdate(BaseModel):
+    research_results: list[dict] = []
+    status: str = "idle"
+    error: str | None = None
+
+
+class Step2ParamsUpdate(BaseModel):
+    model: str = "gemini-2.5-flash-lite"
+    temperature: float = 0.7
+    max_tokens: int = 8192
+    system_prompt: str = ""
+
+
+@app.get("/api/step/2/data")
+async def get_step2():
+    """Get Step 2 stored data."""
+    return get_step2_data()
+
+
+@app.put("/api/step/2/data")
+async def update_step2(body: Step2DataUpdate):
+    """Update Step 2 data (manual edit)."""
+    data = body.model_dump()
+    if not save_step2_data(data):
+        return {"ok": False, "error": "No project loaded. Go to Project and create or load one first."}
+    log_entry("INFO", 2, f"Step 2 data updated. Research results: {len(data['research_results'])}")
+    return {"ok": True}
+
+
+@app.get("/api/step/2/params")
+async def get_step2_params_route():
+    """Get Step 2 parameters."""
+    params = get_step2_params()
+    params["available_models"] = STEP2_MODELS
+    return params
+
+
+@app.put("/api/step/2/params")
+async def update_step2_params(body: Step2ParamsUpdate):
+    """Update Step 2 parameters."""
+    params = body.model_dump()
+    save_step2_params(params)
+    log_entry("INFO", 2, f"Step 2 params updated. Model: {params['model']}, Temp: {params['temperature']}")
+    return {"ok": True}
+
+
+@app.post("/api/step/2/run")
+async def run_step2():
+    """Execute Step 2: run Gemini grounded research for ALL subtopics sequentially."""
+    step1_data = get_step1_data()
+    step2_data = get_step2_data()
+    subtopics = step1_data.get("subtopics", [])
+
+    if not _current_project_path:
+        return {"ok": False, "error": "No project loaded."}
+
+    if not subtopics:
+        return {"ok": False, "error": "No subtopics from Step 1. Run Step 1 first."}
+
+    # Initialize research results from Step 1 subtopics
+    step2_data["research_results"] = _init_research_results(subtopics)
+    step2_data["status"] = "running"
+    step2_data["error"] = None
+    save_step2_data(step2_data)
+
+    log_entry("INFO", 2, f"Starting research for {len(subtopics)} subtopics")
+
+    # Run each sequentially
+    for i in range(len(step2_data["research_results"])):
+        await _research_single_topic(step2_data, i)
+
+    _update_step2_aggregate_status(step2_data)
+    save_step2_data(step2_data)
+
+    log_entry("INFO", 2, f"Step 2 research complete. Status: {step2_data['status']}")
+    return {"ok": True, "research_results": step2_data["research_results"]}
+
+
+@app.post("/api/step/2/run-topic/{topic_id}")
+async def run_step2_topic(topic_id: int):
+    """Execute Step 2: run Gemini grounded research for a SINGLE subtopic."""
+    step2_data = get_step2_data()
+    results = step2_data.get("research_results", [])
+
+    idx = _find_result_index_by_topic_id(results, topic_id)
+    if idx is None:
+        return {"ok": False, "error": f"Topic ID {topic_id} not found in research results."}
+
+    step2_data["status"] = "running"
+    results[idx]["status"] = "running"
+    results[idx]["error"] = None
+    save_step2_data(step2_data)
+
+    log_entry("INFO", 2, f"Researching subtopic #{topic_id}")
+
+    await _research_single_topic(step2_data, idx)
+
+    _update_step2_aggregate_status(step2_data)
+    save_step2_data(step2_data)
+
+    return {"ok": True, "result": results[idx]}
+
+
+# --- Step 2 Core Functions ---
+
+
+def _init_research_results(subtopics: list[dict]) -> list[dict]:
+    """Create research result entries from Step 1 subtopics, preserving completed results."""
+    existing = {}
+    step2_data = get_step2_data()
+    for r in step2_data.get("research_results", []):
+        existing[r.get("topic_id")] = r
+
+    results = []
+    for st in subtopics:
+        tid = st.get("id")
+        if tid in existing and existing[tid].get("status") == "completed":
+            results.append(existing[tid])
+        else:
+            results.append({
+                "topic_id": tid,
+                "research_summary": existing[tid].get("research_summary", "") if tid in existing else "",
+                "sources": existing[tid].get("sources", []) if tid in existing else [],
+                "status": "idle",
+                "error": None,
+                "last_run": existing[tid].get("last_run") if tid in existing else None,
+            })
+    return results
+
+
+def _find_result_index_by_topic_id(results: list[dict], topic_id: int) -> int | None:
+    """Find the index of a research result by its topic_id."""
+    for i, r in enumerate(results):
+        if r.get("topic_id") == topic_id:
+            return i
+    return None
+
+
+def _update_step2_aggregate_status(step2_data: dict) -> None:
+    """Update the top-level status based on individual result statuses."""
+    results = step2_data.get("research_results", [])
+    if not results:
+        step2_data["status"] = "idle"
+        return
+
+    statuses = [r.get("status", "idle") for r in results]
+    if any(s == "running" for s in statuses):
+        step2_data["status"] = "running"
+    elif all(s == "completed" for s in statuses):
+        step2_data["status"] = "completed"
+        step2_data["last_run"] = dt.datetime.now().isoformat()
+    elif all(s == "failed" for s in statuses):
+        step2_data["status"] = "failed"
+    elif any(s == "completed" for s in statuses):
+        step2_data["status"] = "partial"
+    else:
+        step2_data["status"] = "idle"
+
+
+async def _research_single_topic(step2_data: dict, idx: int) -> None:
+    """Run grounded Google Search research for one subtopic with retry logic."""
+    import httpx
+    import asyncio
+
+    result = step2_data["research_results"][idx]
+    params = get_step2_params()
+    settings = load_settings()
+
+    api_key = settings.get("gemini_key", "").strip()
+    if not api_key:
+        result["status"] = "failed"
+        result["error"] = "No Gemini API key configured. Go to Settings to add one."
+        save_step2_data(step2_data)
+        return
+
+    model = params.get("model", "gemini-2.5-flash-lite")
+    temperature = params.get("temperature", 0.7)
+    max_tokens = params.get("max_tokens", 8192)
+    system_prompt = params.get("system_prompt", STEP2_DEFAULT_PARAMS["system_prompt"])
+
+    # Pull Step 1 subtopic fields for the prompt
+    topic_id = result.get("topic_id")
+    step1_data = get_step1_data()
+    st_fields = {}
+    for st in step1_data.get("subtopics", []):
+        if st.get("id") == topic_id:
+            st_fields = st
+            break
+
+    # Build user message from Step 1 subtopic fields
+    user_message = (
+        f"TITLE: {st_fields.get('title', '')}\n"
+        f"ANGLE/ARGUMENT: {st_fields.get('angle', '')}\n"
+        f"EVIDENCE TO LOOK FOR: {st_fields.get('research_info', '')}\n"
+        f"SUGGESTED SEARCH: {st_fields.get('search_query', '')}\n\n"
+        "Research this subtopic using Google Search. Synthesize what you find "
+        "into a thorough research brief. Return ONLY the JSON object."
+    )
+
+    # Build request body
+    is_gemini3 = model.startswith("gemini-3")
+
+    request_body = {
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {"role": "user", "parts": [{"text": user_message}]}
+        ],
+        "tools": [{"google_search": {}}],
+        "generationConfig": {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        },
+    }
+
+    # Gemini 3+ supports responseFormat + google_search together; 2.5 does not
+    if is_gemini3:
+        request_body["generationConfig"]["responseFormat"] = {
+            "type": "application/json",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "research_summary": {"type": "string"},
+                },
+                "required": ["research_summary"],
+                "additionalProperties": False,
+            },
+        }
+
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    headers = {
+        "x-goog-api-key": api_key,
+        "content-type": "application/json",
+    }
+
+    log_entry("INFO", 2, f"Researching subtopic #{result.get('topic_id')} with {model}")
+
+    # Attempt 1
+    success = await _call_gemini(step2_data, idx, endpoint, headers, request_body, attempt=1)
+
+    # Retry after 3s delay on failure
+    if not success:
+        log_entry("WARN", 2, f"Subtopic #{result.get('topic_id')} failed attempt 1. Retrying in 3s...")
+        await asyncio.sleep(3)
+        success = await _call_gemini(step2_data, idx, endpoint, headers, request_body, attempt=2)
+
+    if success:
+        result["status"] = "completed"
+        result["last_run"] = dt.datetime.now().isoformat()
+        log_entry("INFO", 2, f"Subtopic #{result.get('topic_id')} research completed")
+    # If failed, status is already set to "failed" by _call_gemini
+
+
+async def _call_gemini(
+    step2_data: dict, idx: int, endpoint: str, headers: dict,
+    request_body: dict, attempt: int,
+) -> bool:
+    """Make a single Gemini API call. Returns True on success, False on failure."""
+    import httpx
+
+    result = step2_data["research_results"][idx]
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(endpoint, headers=headers, json=request_body)
+
+            if resp.status_code == 200:
+                resp_data = resp.json()
+                candidates = resp_data.get("candidates", [])
+                if not candidates:
+                    result["status"] = "failed"
+                    result["error"] = "Empty response from Gemini (no candidates returned)"
+                    save_step2_data(step2_data)
+                    return False
+
+                content = candidates[0].get("content", {})
+                parts = content.get("parts", [])
+
+                # Extract text and url_citation annotations from all parts
+                response_text = ""
+                sources = []
+                for part in parts:
+                    if "text" in part:
+                        response_text += part["text"]
+                    for ann in part.get("annotations", []):
+                        if ann.get("type") == "url_citation":
+                            sources.append({
+                                "url": ann.get("url", ""),
+                                "title": ann.get("title", ""),
+                            })
+
+                # Parse JSON from response
+                parsed = _parse_gemini_json(response_text)
+
+                if parsed and "research_summary" in parsed:
+                    result["research_summary"] = parsed["research_summary"]
+                    result["sources"] = sources
+                    save_step2_data(step2_data)
+                    return True
+                else:
+                    result["status"] = "failed"
+                    result["error"] = (
+                        f"Failed to parse Gemini response as JSON (attempt {attempt}). "
+                        f"Raw: {response_text[:300]}"
+                    )
+                    save_step2_data(step2_data)
+                    return False
+
+            else:
+                error_detail = _extract_gemini_error(resp)
+                log_entry("ERROR", 2, f"Gemini API error ({resp.status_code}) attempt {attempt}: {error_detail}")
+
+                result["status"] = "failed"
+                if resp.status_code == 401:
+                    result["error"] = "Authentication failed. Check your Gemini API key in Settings."
+                elif resp.status_code == 403:
+                    result["error"] = "Access denied. Your API key may not have permission for this model or Google Search grounding."
+                elif resp.status_code == 429:
+                    result["error"] = f"Rate limited (attempt {attempt}). The model is busy — try again in a moment."
+                elif resp.status_code == 400:
+                    result["error"] = f"Bad request (attempt {attempt}): {error_detail}"
+                elif resp.status_code == 503:
+                    result["error"] = f"Service unavailable (attempt {attempt}). Gemini may be overloaded — try again shortly."
+                else:
+                    result["error"] = f"API error ({resp.status_code}) attempt {attempt}: {error_detail}"
+                save_step2_data(step2_data)
+                return False
+
+    except httpx.TimeoutException:
+        result["status"] = "failed"
+        result["error"] = f"Request timed out after 120s (attempt {attempt})"
+        save_step2_data(step2_data)
+        log_entry("ERROR", 2, f"Gemini timeout on attempt {attempt} for subtopic #{result.get('topic_id')}")
+        return False
+
+    except Exception as e:
+        result["status"] = "failed"
+        result["error"] = f"Unexpected error (attempt {attempt}): {str(e)}"
+        save_step2_data(step2_data)
+        log_entry("ERROR", 2, f"Gemini unexpected error attempt {attempt}: {str(e)}")
+        return False
+
+
+def _parse_gemini_json(text: str) -> dict | None:
+    """Parse JSON from Gemini response text. Handles markdown fences and common issues."""
+    import re
+
+    if not text or not text.strip():
+        return None
+
+    # Try direct parse first
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting from ```json ... ``` fences
+    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Try finding first { to last } brace pair
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+def _extract_gemini_error(resp) -> str:
+    """Extract error message from a Gemini error response."""
+    try:
+        err_data = resp.json()
+        return err_data.get("error", {}).get("message", resp.text[:500])
+    except Exception:
+        return resp.text[:500]
 
 
 if __name__ == "__main__":
