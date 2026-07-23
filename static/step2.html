@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Step 2: Subtopic Research — ArtGen</title>
+    <title>Step 2: Draft — ArtGen</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -13,8 +13,8 @@
             <div class="project-name" id="sidebar-project-name">No project</div>
             <div class="nav-section">Pipeline</div>
             <a href="/"><span class="step-dot" id="dot-step0"></span>0. Project</a>
-            <a href="/step/1" class="step-link"><span class="step-dot idle" id="dot-step1"></span>1. Subtopic Planning</a>
-            <a href="/step/2" class="active step-link"><span class="step-dot idle" id="dot-step2"></span>2. Subtopic Research</a>
+            <a href="/step/1" class="step-link"><span class="step-dot idle" id="dot-step1"></span>1. Outline</a>
+            <a href="/step/2" class="active step-link"><span class="step-dot idle" id="dot-step2"></span>2. Draft</a>
             <a href="/step/3" class="step-link"><span class="step-dot idle" id="dot-step3"></span>3. Article Draft</a>
             <a href="/step/4" class="step-link"><span class="step-dot idle" id="dot-step4"></span>4. Style Rewrite</a>
             <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Images</a>
@@ -26,8 +26,8 @@
         <div id="main">
             <div id="content">
                 <div class="page-header">
-                    <h1>Step 2: Subtopic Research</h1>
-                    <p>Research each subtopic independently using Gemini with grounded Google Search</p>
+                    <h1>Step 2: Draft</h1>
+                    <p>Write first drafts for each outline card using Claude with extended thinking</p>
                 </div>
 
                 <!-- Parameters Card -->
@@ -44,8 +44,24 @@
                         </div>
                         <div class="form-group">
                             <label for="step2-max-tokens">Max Tokens</label>
-                            <input type="number" id="step2-max-tokens" value="8192" min="100" max="65536">
+                            <input type="number" id="step2-max-tokens" value="4096" min="100" max="65536">
                         </div>
+                    </div>
+                    <div class="form-group" id="step2-thinking-budget-group">
+                        <label for="step2-thinking-budget">Thinking Budget (tokens)</label>
+                        <input type="number" id="step2-thinking-budget" value="1600" min="256" max="32768">
+                        <p style="font-size:11px; color:var(--text-secondary); margin-top:4px;">Haiku 4.5 only — tokens reserved for extended thinking.</p>
+                    </div>
+                    <div class="form-group" id="step2-effort-group" style="display:none;">
+                        <label for="step2-effort">Effort</label>
+                        <select id="step2-effort">
+                            <option value="low">Low — fast, cheaper</option>
+                            <option value="medium">Medium — balanced</option>
+                            <option value="high" selected>High — thorough (default)</option>
+                            <option value="xhigh">X-High — best for coding/agentic</option>
+                            <option value="max">Max — correctness over cost</option>
+                        </select>
+                        <p style="font-size:11px; color:var(--text-secondary); margin-top:4px;">Sonnet 5 / Opus 4.8 only — controls thinking depth and token spend.</p>
                     </div>
                     <div class="form-group">
                         <label for="step2-system-prompt">System Prompt</label>
@@ -57,21 +73,21 @@
 
                 <div id="step2-error" style="display:none;"></div>
 
-                <!-- Research All -->
+                <!-- Draft All -->
                 <div class="card" id="step2-controls-card" style="display:none;">
-                    <h2>Research All Subtopics</h2>
+                    <h2>Draft All Cards</h2>
                     <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">
-                        Runs research for every subtopic sequentially. Each can also be run independently below.
+                        Runs draft writing for every card sequentially. Each can also be drafted independently below.
                     </p>
-                    <button id="step2-run-all-btn">🔍 Research All</button>
+                    <button id="step2-run-all-btn">✍️ Draft All</button>
                     <span id="step2-run-status"></span>
                 </div>
 
-                <!-- Research Results -->
+                <!-- Draft Results -->
                 <div id="step2-results-container">
                     <div class="card">
                         <p style="color:var(--text-secondary)">
-                            No subtopics to research yet. Go to Step 1 to generate your article outline first.
+                            No outline cards to draft yet. Go to Step 1 to generate your article outline first.
                         </p>
                     </div>
                 </div>

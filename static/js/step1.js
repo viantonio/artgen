@@ -1,4 +1,4 @@
-// Step 1: Subtopic Planning UI
+// Step 1: Outline UI
 
 let _currentSystemPrompt = '';
 let _currentModel = '';
@@ -36,10 +36,13 @@ async function initStep1() {
     });
     document.getElementById('step1-model').addEventListener('change', () => {
         _currentModel = document.getElementById('step1-model').value;
+        updateModelSpecificParams();
         updatePromptPreview();
     });
     document.getElementById('step1-temperature').addEventListener('change', () => updatePromptPreview());
     document.getElementById('step1-max-tokens').addEventListener('change', () => updatePromptPreview());
+    document.getElementById('step1-thinking-budget').addEventListener('change', () => updatePromptPreview());
+    document.getElementById('step1-effort').addEventListener('change', () => updatePromptPreview());
 
     updatePromptPreview();
 }
@@ -47,11 +50,11 @@ async function initStep1() {
 async function loadStep1Data() {
     try {
         const data = await API.get('/api/step/1/data');
-        document.getElementById('step1-topic').value = data.topic || '';
-        document.getElementById('step1-count').value = data.subtopic_count || 5;
+        document.getElementById('step1-topic').value = data.brief || '';
+        document.getElementById('step1-count').value = data.middle_count || 1;
 
-        if (data.subtopics && data.subtopics.length > 0) {
-            renderSubtopics(data.subtopics);
+        if (data.cards && data.cards.length > 0) {
+            renderCards(data.cards);
         }
 
         const statusEl = document.getElementById('step1-run-status');
@@ -79,8 +82,11 @@ async function loadStep1Params() {
         document.getElementById('step1-temperature').value = params.temperature || 1.0;
         document.getElementById('temp-value').textContent = (params.temperature || 1.0).toFixed(1);
         document.getElementById('step1-max-tokens').value = params.max_tokens || 4096;
+        document.getElementById('step1-thinking-budget').value = params.thinking_budget || 1600;
+        document.getElementById('step1-effort').value = params.effort || 'high';
         document.getElementById('step1-system-prompt').value = params.system_prompt || '';
         _currentSystemPrompt = params.system_prompt || '';
+        updateModelSpecificParams();
     } catch (e) {
         console.error('Failed to load Step 1 params:', e);
     }
@@ -88,12 +94,12 @@ async function loadStep1Params() {
 
 async function saveBriefAndCount() {
     const brief = document.getElementById('step1-topic').value;
-    const count = parseInt(document.getElementById('step1-count').value) || 5;
+    const middleCount = parseInt(document.getElementById('step1-count').value) || 1;
     try {
         const result = await API.put('/api/step/1/data', {
-            topic: brief,
-            subtopic_count: count,
-            subtopics: [],
+            brief: brief,
+            middle_count: middleCount,
+            cards: [],
             status: 'idle',
             error: null,
         });
@@ -109,35 +115,34 @@ async function saveBriefAndCount() {
 
 function buildFullPrompt() {
     const brief = document.getElementById('step1-topic').value.trim() || '(no brief entered yet)';
-    const count = parseInt(document.getElementById('step1-count').value) || 5;
+    const middleCount = parseInt(document.getElementById('step1-count').value) || 1;
+    const totalCards = middleCount + 2;
     const systemPrompt = _currentSystemPrompt || '(no system prompt set)';
 
-    // NOTE: minItems > 1 / maxItems not supported by Anthropic structured outputs.
-    // Count is enforced via the user message text instead.
     const schema = JSON.stringify({
         type: "object",
         properties: {
-            subtopics: {
+            cards: {
                 type: "array",
                 items: {
                     type: "object",
                     properties: {
                         id: { type: "integer", description: "1-based index" },
+                        type: { type: "string", description: "Card type: 'beginning', 'middle', or 'end'" },
                         title: { type: "string", description: "Sharp, clickable section headline" },
-                        angle: { type: "string", description: "The argument this section makes — the claim we're advancing" },
-                        research_info: { type: "string", description: "Evidence to back up this argument: data, history, expert opinion, case studies, accounts — whatever proves the claim" },
-                        search_query: { type: "string", description: "Targeted search query (5-12 words) to find the strongest sources supporting this argument" }
+                        angle: { type: "string", description: "The argument this card makes" },
+                        ammo: { type: "string", description: "Braindump of raw material for the draft writer" }
                     },
-                    required: ["id", "title", "angle", "research_info", "search_query"],
+                    required: ["id", "type", "title", "angle", "ammo"],
                     additionalProperties: false
                 }
             }
         },
-        required: ["subtopics"],
+        required: ["cards"],
         additionalProperties: false
     }, null, 2);
 
-    const userMessage = `BRIEF: ${brief}\n\nBased on the brief above, generate exactly ${count} subtopics that comprehensively cover the key arguments and themes described. For each subtopic, provide a title, angle, research_info, and search_query as specified in the output schema.\n\nRemember: each section must make an argument and back it up with evidence. Choose the type of evidence that best supports the claim — data, journalism, historical examples, expert analysis, personal accounts, whatever fits. Return ONLY valid JSON.`;
+    const userMessage = `BRIEF: ${brief}\n\nGenerate 1 beginning card, ${middleCount} middle cards, and 1 end card (${totalCards} cards total). Each card needs a type, title, angle, and ammo as specified in the output schema.\n\nRemember: the AMMO field is the most important output. It's a braindump of raw material for the draft writer — be generous, messy, and maximalist.\n\nReturn ONLY valid JSON.`;
 
     return `=== SYSTEM PROMPT (sent as 'system' parameter) ===
 ${systemPrompt}
@@ -176,6 +181,8 @@ async function saveParams() {
             model: _currentModel,
             temperature: parseFloat(document.getElementById('step1-temperature').value),
             max_tokens: parseInt(document.getElementById('step1-max-tokens').value),
+            thinking_budget: parseInt(document.getElementById('step1-thinking-budget').value),
+            effort: document.getElementById('step1-effort').value,
             system_prompt: _currentSystemPrompt,
         });
         status.innerHTML = '<span style="color:var(--success)">✓ Saved</span>';
@@ -186,6 +193,17 @@ async function saveParams() {
     } finally {
         btn.disabled = false;
         btn.textContent = 'Save Parameters';
+    }
+}
+
+function updateModelSpecificParams() {
+    const isHaiku = _currentModel.startsWith('claude-haiku');
+    document.getElementById('step1-thinking-budget-group').style.display = isHaiku ? 'block' : 'none';
+    document.getElementById('step1-effort-group').style.display = isHaiku ? 'none' : 'block';
+    // Haiku requires temp = 1.0 for thinking
+    if (isHaiku) {
+        document.getElementById('step1-temperature').value = 1.0;
+        document.getElementById('temp-value').textContent = '1.0';
     }
 }
 
@@ -203,18 +221,18 @@ async function runStep1() {
         await saveBriefAndCount();
         // Check if save failed (e.g. no project)
         const saved = await API.get('/api/step/1/data');
-        if (!saved.topic || !saved.topic.trim()) {
+        if (!saved.brief || !saved.brief.trim()) {
             status.innerHTML = '<span style="color:var(--error)">✗ Failed</span>';
             showError('Could not save your brief. Do you have a project loaded? Go to Project and create one.');
             btn.disabled = false;
-            btn.textContent = '🚀 Generate Subtopics';
+            btn.textContent = '🚀 Generate Outline';
             return;
         }
         const result = await API.post('/api/step/1/run', {});
 
-        if (result.ok && result.subtopics) {
+        if (result.ok && result.cards) {
             status.innerHTML = '<span style="color:var(--success)">✓ Completed</span>';
-            renderSubtopics(result.subtopics);
+            renderCards(result.cards);
         } else {
             status.innerHTML = '<span style="color:var(--error)">✗ Failed</span>';
             showError(result.error || 'Unknown error');
@@ -224,34 +242,58 @@ async function runStep1() {
         showError(e.message);
     } finally {
         btn.disabled = false;
-        btn.textContent = '🚀 Generate Subtopics';
+        btn.textContent = '🚀 Generate Outline';
     }
 }
 
-function renderSubtopics(subtopics) {
+function getTypeBadge(type) {
+    const colors = {
+        'beginning': { bg: '#2d1f6e', text: '#b4a0ff', label: 'Beginning' },
+        'middle': { bg: '#1e3a5f', text: '#7ab7ef', label: 'Middle' },
+        'end': { bg: '#1e5f3a', text: '#7aef9f', label: 'End' },
+    };
+    const c = colors[type] || colors['middle'];
+    return `<span style="display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; background:${c.bg}; color:${c.text}; flex-shrink:0;">${c.label}</span>`;
+}
+
+function renderCards(cards) {
     const output = document.getElementById('step1-output');
+
+    // Count middle cards for proper numbering
+    let middleIdx = 0;
+    const labels = cards.map(c => {
+        if (c.type === 'beginning') return 'Beginning';
+        if (c.type === 'end') return 'End';
+        middleIdx++;
+        return `Middle #${middleIdx}`;
+    });
+
     output.innerHTML = `
         <div id="subtopic-cards">
-            ${subtopics.map(st => `
+            ${cards.map((card, i) => {
+                const ammoText = card.ammo || '';
+                const ammoTruncated = ammoText.length > 300;
+                const previewText = ammoTruncated ? ammoText.substring(0, 300) + '...' : ammoText;
+
+                return `
                 <div class="subtopic-card" style="background:var(--surface2); border-radius:var(--radius); padding:16px; margin-bottom:14px; border-left:3px solid var(--accent);">
-                    <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:10px;">
-                        <span style="font-weight:700; color:var(--accent); font-size:14px; flex-shrink:0;">#${st.id}</span>
-                        <span style="font-weight:600; font-size:15px; line-height:1.4;">${escapeHtml(st.title || '(untitled)')}</span>
+                    <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+                        ${getTypeBadge(card.type)}
+                        <span style="font-size:11px; color:var(--text-secondary);">${labels[i]}</span>
+                        <span style="font-weight:600; font-size:15px; line-height:1.4; flex:1; min-width:200px;">${escapeHtml(card.title || '(untitled)')}</span>
                     </div>
                     <div style="margin-bottom:8px;">
                         <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Angle</span>
-                        <p style="margin:2px 0 0 0; font-size:13px; line-height:1.5; color:var(--text);">${escapeHtml(st.angle || '—')}</p>
-                    </div>
-                    <div style="margin-bottom:8px;">
-                        <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Research Info</span>
-                        <p style="margin:2px 0 0 0; font-size:13px; line-height:1.5; color:var(--text);">${escapeHtml(st.research_info || '—')}</p>
+                        <p style="margin:2px 0 0 0; font-size:13px; line-height:1.5; color:var(--text);">${escapeHtml(card.angle || '—')}</p>
                     </div>
                     <div style="margin-bottom:0;">
-                        <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Search Query</span>
-                        <p style="margin:2px 0 0 0; font-size:12px; font-family:var(--mono); color:var(--accent); background:var(--bg); padding:6px 10px; border-radius:4px; word-break:break-all;">${escapeHtml(st.search_query || '—')}</p>
+                        <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Ammo ${ammoTruncated ? `<span style="color:var(--accent); cursor:pointer; font-size:11px;" onclick="this.closest('.subtopic-card').querySelector('.ammo-full').style.display='block'; this.closest('.subtopic-card').querySelector('.ammo-preview').style.display='none'; this.style.display='none';">(show all — ${ammoText.length} chars)</span>` : ''}</span>
+                        <div class="ammo-preview" style="margin-top:4px; font-size:13px; line-height:1.5; color:var(--text); white-space:pre-wrap;">${escapeHtml(previewText)}</div>
+                        ${ammoTruncated ? `<div class="ammo-full" style="display:none; margin-top:4px; font-size:13px; line-height:1.5; color:var(--text); white-space:pre-wrap;">${escapeHtml(ammoText)}</div>` : ''}
                     </div>
                 </div>
-            `).join('')}
+                `;
+            }).join('')}
         </div>
     `;
 }

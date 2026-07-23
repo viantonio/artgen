@@ -43,10 +43,54 @@ def mask_key(key: str) -> str:
         return "*" * len(key)
     return key[:4] + "*" * (len(key) - 8) + key[-4:]
 
+# --- Startup recovery: reset stuck "running" states from previous crashes ---
+def _recover_stuck_steps() -> None:
+    """On startup, reset any step data stuck in 'running' status from a previous crash/restart."""
+    if not DATA_DIR.exists():
+        return
+    recovered = 0
+    for entry in DATA_DIR.iterdir():
+        if not entry.is_dir():
+            continue
+        for step_file_name in ["step1.json", "step2.json", "step3.json", "step4.json", "step5.json"]:
+            step_file = entry / step_file_name
+            if not step_file.exists():
+                continue
+            try:
+                with open(step_file) as f:
+                    data = json.load(f)
+                changed = False
+
+                # Top-level status
+                if data.get("status") == "running":
+                    data["status"] = "idle"
+                    data["error"] = "Server was restarted — previous run interrupted. Please retry."
+                    changed = True
+
+                # Step 2: nested draft entries can also be stuck
+                for d in data.get("drafts", []):
+                    if d.get("status") == "running":
+                        d["status"] = "idle"
+                        d["error"] = "Server was restarted — previous run interrupted. Please retry."
+                        changed = True
+
+                if changed:
+                    with open(step_file, "w") as f:
+                        json.dump(data, f, indent=2)
+                    recovered += 1
+                    print(f"  Recovered {entry.name}/{step_file_name} — reset stuck 'running' to 'idle'")
+            except Exception as e:
+                print(f"  Skipped {entry.name}/{step_file_name}: {e}")
+    if recovered:
+        print(f"Recovery complete: {recovered} file(s) reset.")
+
+
 # --- FastAPI app ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: log that the server started."""
+    """Startup: recover stuck state, then start serving."""
+    print("ArtGen server starting...")
+    _recover_stuck_steps()
     print("ArtGen server started at http://localhost:8000")
     yield
 
@@ -258,11 +302,11 @@ def init_step_files(proj_dir: Path) -> None:
     proj_dir.mkdir(parents=True, exist_ok=True)
 
     step1_default = {
-        "topic": "", "subtopic_count": 5, "subtopics": [],
+        "brief": "", "middle_count": 1, "cards": [],
         "status": "idle", "last_run": None, "error": None,
     }
     step2_default = {
-        "research_results": [], "status": "idle", "last_run": None, "error": None,
+        "drafts": [], "status": "idle", "last_run": None, "error": None,
     }
     step3_default = {
         "draft_article": "", "status": "idle", "last_run": None, "error": None,
@@ -610,41 +654,54 @@ async def stream_log():
 
 STEP1_DEFAULT_PARAMS = {
     "model": "claude-haiku-4-5",
-    "temperature": 0.5,
+    "temperature": 1.0,
     "max_tokens": 4096,
+    "thinking_budget": 1600,
+    "effort": "high",
     "system_prompt": (
-        "You are designing the outline for a persuasive, well-researched article. Your outline will be handed off to a research agent "
-        "and then to a writer — your job is to give them the best possible blueprint.\n\n"
-        "Given a brief describing what the article should cover, produce exactly the requested number of subtopics. "
-        "Each subtopic will become a full section of the finished article. Think of each one as a chapter in a book: "
-        "it needs a reason to exist, a clear argument, and enough depth to justify its word count.\n\n"
-        "CORE PRINCIPLE: Every section must make an argument and back it up with evidence. The article is persuasive, "
-        "not a neutral summary. Each subtopic should advance a claim — something debatable, interesting, worth convincing "
-        "the reader of. The research agent's job is to find sources that support that claim.\n\n"
-        "Be pragmatic about evidence. Sometimes the best support is academic research and data. Sometimes it's investigative "
-        "journalism, historical precedent, expert testimony, legal analysis, or first-person accounts. Sometimes it's a mix. "
-        "The type of evidence should fit the argument — don't force statistics where a compelling narrative case is stronger, "
-        "and don't rely on anecdotes where hard data would be more convincing.\n\n"
+        "You are designing the outline for a persuasive article. Your outline will be handed off to a draft writer "
+        "— your job is to give them the best possible ammunition.\n\n"
+        "Given a brief, you will produce a structured outline broken into cards. Each card represents one section "
+        "of the finished article. There are three card types, each with a distinct purpose:\n\n"
+        "BEGINNING (1 card): The opener. Hook the reader immediately — don’t waste words on throat-clearing. "
+        "Introduce the topic with urgency, state the thesis clearly, and make the reader understand why this matters "
+        "right now. The angle should be the article’s core argument. The ammo should be a braindump of everything "
+        "the draft writer could use: startling facts, provocative questions, a compelling anecdote or scene, "
+        "the stakes if the reader ignores this, why conventional wisdom is wrong, what’s at risk.\n\n"
+        "MIDDLE (N cards, user-specified): The argument chain. Each middle card advances ONE specific claim that "
+        "supports the thesis. No two cards should make the same argument — if they overlap, sharpen the distinction "
+        "or merge them. The angle is the specific claim this card proves. The ammo should be a maximalist braindump: "
+        "evidence of all kinds (data, examples, historical parallels, expert takes, counter-arguments to preempt, "
+        "case studies, institutional failures, personal stories, logical reasoning, metaphors, rhetorical strategies). "
+        "Throw in everything — the draft writer will curate. Don’t hold back.\n\n"
+        "END (1 card): The closer. Drive the thesis home with force. Don’t just summarize — make the reader feel "
+        "something. Address the \"so what?\" question. The angle should be the lasting impression you want to leave. "
+        "The ammo should include: callbacks to the opening, broader implications, what happens next, a call to action "
+        "or a shift in perspective, a memorable final image or line.\n\n"
+        "THE AMMO FIELD IS THE MOST IMPORTANT OUTPUT. It is NOT the draft itself — it’s raw material. "
+        "Be generous, messy, maximalist. Dump every relevant fact, angle, example, rhetorical move, "
+        "counter-argument, and idea you can generate. The draft writer needs a rich pile to work from.\n\n"
         "Your output must be valid JSON matching this schema:\n"
         "{\n"
-        '  "subtopics": [\n'
+        "  \"cards\": [\n"
         "    {\n"
-        '      "id": 1,\n'
-        '      "title": "A sharp, clickable section headline that makes someone want to read it",\n'
-        '      "angle": "The argument this section makes — what claim are we advancing? what should the reader be convinced of by the end of this section?",\n'
-        '      "research_info": "The kind of evidence that would best support this argument: specific data points, historical examples, expert opinions, case studies, legal rulings, personal accounts, institutional patterns — whatever form of proof makes the argument land hardest",\n'
-        '      "search_query": "THE MOST CRITICAL FIELD. This query will be used with Google Search to research this subtopic. Craft a creative, effective search that would surface the kind of evidence needed to prove the angle. Start from the observable reality described in the angle — what would someone actually search to understand WHY this happens? Make it a search that makes sense, not a keyword dump. Think about what terms would surface investigative journalism, deep analysis, documented cases, financial reporting, or expert commentary — whatever best fits the evidence this argument needs. Be specific enough to find real results, broad enough to cast a wide net."\n'
+        "      \"id\": 1,\n"
+        "      \"type\": \"beginning\",\n"
+        "      \"title\": \"A sharp, clickable section headline\",\n"
+        "      \"angle\": \"The argument this card makes — the claim we’re advancing\",\n"
+        "      \"ammo\": \"THE CRITICAL FIELD. A generous braindump of everything the draft writer needs: facts, examples, counter-arguments, rhetorical strategies, data points, historical parallels, metaphors, emotional beats. Messy and maximalist — the writer will curate from this pile.\"\n"
         "    }\n"
         "  ]\n"
         "}\n\n"
-        "Rules for a strong outline:\n"
-        "- Every subtopic must earn its place. If two subtopics overlap, merge them or sharpen their distinctions.\n"
-        "- Titles should sound like something you'd click on. No academic paper titles.\n"
-        "- Angles must be arguable. Not \"an overview of X\" — more like \"here's why X is actually Y\" or \"the case for X.\" If nobody could disagree with it, the angle isn't sharp enough.\n"
-        "- Research info should be specific about what kind of evidence the argument needs. Don't just say \"find sources\" — say what kind of sources and what they should demonstrate.\n"
-        "- Search queries are THE critical output — Step 2’s entire research quality depends on them. Craft a creative, effective Google search for each subtopic. Start from the observable reality in the angle and search for evidence that proves it. Do not just stuff keywords together — think about what an intelligent person would actually type into Google to find deep analysis, investigative reporting, documented cases, or expert commentary on this specific argument. Be specific enough to surface real results, broad enough to not miss unexpected angles. The query should make sense as a search, not read like a list of concepts.\n"
-        "- Cover the brief completely. The full set of subtopics should leave no major aspect of the brief unexplored.\n"
-        "- Order matters. Arrange subtopics in the sequence they should appear in the finished article: open strong, build momentum, end memorably.\n\n"
+        "Rules:\n"
+        "- Card types MUST be exactly ‘beginning’, ‘middle’, or ‘end’ — no other values.\n"
+        "- Exactly 1 beginning card (id=1) and 1 end card (last id). Middle cards fill the gap.\n"
+        "- Every card must earn its place. No filler sections.\n"
+        "- Titles should sound like something you’d click on.\n"
+        "- Angles must be arguable — if nobody could disagree, sharpen it.\n"
+        "- Ammo should be long, rich, and varied. More is better. Don’t self-censor.\n"
+        "- Cover the brief completely — no major aspect unexplored.\n"
+        "- Order matters: open strong, build momentum, end memorably.\n\n"
         "Return ONLY the JSON object, no preamble, no commentary."
     ),
 }
@@ -687,7 +744,7 @@ def get_step1_data() -> dict:
             with open(step_file) as f:
                 return json.load(f)
     return {
-        "topic": "", "subtopic_count": 5, "subtopics": [],
+        "brief": "", "middle_count": 1, "cards": [],
         "status": "idle", "last_run": None, "error": None,
     }
 
@@ -704,9 +761,9 @@ def save_step1_data(data: dict) -> bool:
 
 
 class Step1DataUpdate(BaseModel):
-    topic: str = ""
-    subtopic_count: int = 5
-    subtopics: list[dict] = []
+    brief: str = ""
+    middle_count: int = 1
+    cards: list[dict] = []
     status: str = "idle"
     error: str | None = None
 
@@ -723,7 +780,7 @@ async def update_step1(body: Step1DataUpdate):
     data = body.model_dump()
     if not save_step1_data(data):
         return {"ok": False, "error": "No project loaded. Go to Project and create or load one first."}
-    log_entry("INFO", 1, f"Step 1 data updated. Brief length: {len(data['topic'])}, Subtopics: {len(data['subtopics'])}")
+    log_entry("INFO", 1, f"Step 1 data updated. Brief length: {len(data['brief'])}, Cards: {len(data['cards'])}")
     return {"ok": True}
 
 
@@ -737,8 +794,10 @@ async def get_step1_params_route():
 
 class Step1ParamsUpdate(BaseModel):
     model: str = "claude-haiku-4-5"
-    temperature: float = 0.5
+    temperature: float = 1.0
     max_tokens: int = 4096
+    thinking_budget: int = 1600
+    effort: str = "high"
     system_prompt: str = ""
 
 
@@ -772,8 +831,8 @@ async def run_step1():
         save_step1_data(data)
         return {"ok": False, "error": data["error"]}
 
-    brief = data.get("topic", "").strip()
-    subtopic_count = data.get("subtopic_count", 5)
+    brief = data.get("brief", "").strip()
+    middle_count = data.get("middle_count", 1)
 
     if not brief:
         log_entry("ERROR", 1, "No brief provided")
@@ -782,10 +841,10 @@ async def run_step1():
         save_step1_data(data)
         return {"ok": False, "error": data["error"]}
 
-    if subtopic_count < 1 or subtopic_count > 20:
-        log_entry("ERROR", 1, f"Invalid subtopic count: {subtopic_count}")
+    if middle_count < 1 or middle_count > 20:
+        log_entry("ERROR", 1, f"Invalid middle count: {middle_count}")
         data["status"] = "failed"
-        data["error"] = "Subtopic count must be between 1 and 20."
+        data["error"] = "Middle section count must be between 1 and 20."
         save_step1_data(data)
         return {"ok": False, "error": data["error"]}
 
@@ -796,60 +855,76 @@ async def run_step1():
     model = params.get("model", "claude-haiku-4-5")
     temperature = params.get("temperature", 1.0)
     max_tokens = params.get("max_tokens", 4096)
+    thinking_budget = params.get("thinking_budget", 1600)
+    effort = params.get("effort", "high")
     system_prompt = params.get("system_prompt", STEP1_DEFAULT_PARAMS["system_prompt"])
+
+    total_cards = middle_count + 2  # beginning + N middle + end
 
     user_message = (
         f"BRIEF: {brief}\n\n"
-        f"Generate exactly {subtopic_count} subtopics that comprehensively cover "
-        f"the key arguments in the brief above. For each subtopic, provide a title, "
-        f"angle, research_info, and search_query as specified in the output schema.\n\n"
-        f"The SEARCH QUERY is the most important field. It will be used by a research "
-        f"agent with Google Search to find evidence that proves your angle. Craft each "
-        f"query as a creative, effective Google search — think about what an intelligent "
-        f"person would actually type in to find deep analysis, investigative reporting, "
-        f"or documented cases on this specific argument. Make it a search that makes sense, "
-        f"not a keyword dump. Be specific enough to surface real results, broad enough to "
-        f"catch unexpected angles.\n\n"
+        f"Generate 1 beginning card, {middle_count} middle cards, and 1 end card "
+        f"({total_cards} cards total). Each card needs a type, title, angle, and ammo "
+        f"as specified in the output schema.\n\n"
+        f"Remember: the AMMO field is the most important output. It's a braindump of "
+        f"raw material for the draft writer — be generous, messy, and maximalist. "
+        f"Dump every relevant fact, angle, example, counter-argument, and rhetorical "
+        f"idea you can generate.\n\n"
         f"Return ONLY valid JSON."
     )
 
-    # NOTE: minItems > 1 and maxItems are NOT supported by Anthropic structured outputs.
-    # The exact count is enforced via the user message + system prompt instead.
     output_schema = {
         "type": "object",
         "properties": {
-            "subtopics": {
+            "cards": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "integer", "description": "1-based index"},
+                        "type": {"type": "string", "description": "Card type: 'beginning', 'middle', or 'end'"},
                         "title": {"type": "string", "description": "Sharp, clickable section headline"},
-                        "angle": {"type": "string", "description": "The argument this section makes — the claim we're advancing and convincing the reader of"},
-                        "research_info": {"type": "string", "description": "The evidence needed to back up this argument: data, historical examples, expert opinions, case studies, legal rulings, personal accounts, institutional patterns — whatever best proves the claim"},
-                        "search_query": {"type": "string", "description": "Targeted search query (5-12 words) to find the strongest sources supporting this section's argument"},
+                        "angle": {"type": "string", "description": "The argument this card makes — the claim we're advancing"},
+                        "ammo": {"type": "string", "description": "Braindump of raw material: facts, examples, counter-arguments, rhetorical strategies, data, metaphors — everything the draft writer needs"},
                     },
-                    "required": ["id", "title", "angle", "research_info", "search_query"],
+                    "required": ["id", "type", "title", "angle", "ammo"],
                     "additionalProperties": False,
                 },
             }
         },
-        "required": ["subtopics"],
+        "required": ["cards"],
         "additionalProperties": False,
     }
 
-    request_body = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": user_message}],
-        "output_config": {
-            "format": {"type": "json_schema", "schema": output_schema},
-        },
-    }
-
-    log_entry("INFO", 1, f"Calling Anthropic API. Model: {model}, Brief length: {len(brief)}, Count: {subtopic_count}")
+    # Build model-appropriate thinking config
+    is_haiku = model.startswith("claude-haiku")
+    if is_haiku:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": 1.0,  # required for thinking on Haiku
+            "system": system_prompt,
+            "thinking": {"type": "enabled", "budget_tokens": thinking_budget},
+            "messages": [{"role": "user", "content": user_message}],
+            "output_config": {
+                "format": {"type": "json_schema", "schema": output_schema},
+            },
+        }
+        log_entry("INFO", 1, f"Calling Anthropic API. Model: {model}, Brief length: {len(brief)}, Middle count: {middle_count}, Thinking budget: {thinking_budget}")
+    else:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_prompt,
+            "thinking": {"type": "adaptive"},
+            "output_config": {
+                "format": {"type": "json_schema", "schema": output_schema},
+                "effort": effort,
+            },
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        log_entry("INFO", 1, f"Calling Anthropic API. Model: {model}, Brief length: {len(brief)}, Middle count: {middle_count}, Effort: {effort}")
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -873,35 +948,45 @@ async def run_step1():
 
                 try:
                     parsed = json.loads(response_text)
-                    subtopics = parsed.get("subtopics", [])
+                    cards = parsed.get("cards", [])
 
-                    if len(subtopics) != subtopic_count:
-                        log_entry("WARN", 1, f"Model returned {len(subtopics)} subtopics, expected {subtopic_count}. Using what was returned.")
-                        subtopics = subtopics[:subtopic_count]
+                    expected = total_cards
+                    if len(cards) != expected:
+                        log_entry("WARN", 1, f"Model returned {len(cards)} cards, expected {expected}. Using what was returned.")
+                        cards = cards[:expected]
 
-                    for i, st in enumerate(subtopics):
-                        st["id"] = i + 1
+                    for i, card in enumerate(cards):
+                        card["id"] = i + 1
+                        # Ensure type is valid
+                        if card.get("type") not in ("beginning", "middle", "end"):
+                            if i == 0:
+                                card["type"] = "beginning"
+                            elif i == len(cards) - 1:
+                                card["type"] = "end"
+                            else:
+                                card["type"] = "middle"
 
-                    data["subtopics"] = subtopics
+                    data["cards"] = cards
                     data["status"] = "completed"
                     data["last_run"] = dt.datetime.now().isoformat()
                     data["error"] = None
                     save_step1_data(data)
 
-                    log_entry("INFO", 1, f"Step 1 completed. Generated {len(subtopics)} subtopics.")
-                    return {"ok": True, "subtopics": subtopics}
+                    log_entry("INFO", 1, f"Step 1 completed. Generated {len(cards)} cards.")
+                    return {"ok": True, "cards": cards}
 
                 except json.JSONDecodeError as parse_err:
                     log_entry("ERROR", 1, f"Failed to parse model response as JSON: {parse_err}")
-                    subtopics = _parse_subtopics_fallback(response_text, subtopic_count)
-                    if subtopics:
-                        data["subtopics"] = subtopics
+                    # Fallback: try to extract cards from text
+                    cards = _parse_cards_fallback(response_text, total_cards)
+                    if cards:
+                        data["cards"] = cards
                         data["status"] = "completed"
                         data["last_run"] = dt.datetime.now().isoformat()
                         data["error"] = None
                         save_step1_data(data)
-                        log_entry("WARN", 1, f"Step 1 completed via fallback. Generated {len(subtopics)} subtopics.")
-                        return {"ok": True, "subtopics": subtopics}
+                        log_entry("WARN", 1, f"Step 1 completed via fallback. Generated {len(cards)} cards.")
+                        return {"ok": True, "cards": cards}
                     else:
                         data["status"] = "failed"
                         data["error"] = f"Failed to parse model response. Raw: {response_text[:500]}"
@@ -937,7 +1022,7 @@ async def run_step1():
     except httpx.TimeoutException:
         log_entry("ERROR", 1, "Anthropic API request timed out (120s)")
         data["status"] = "failed"
-        data["error"] = "Request timed out after 120 seconds. Try a faster model or fewer subtopics."
+        data["error"] = "Request timed out after 120 seconds. Try a faster model or fewer middle sections."
         save_step1_data(data)
         return {"ok": False, "error": data["error"]}
 
@@ -949,11 +1034,11 @@ async def run_step1():
         return {"ok": False, "error": data["error"]}
 
 
-def _parse_subtopics_fallback(text: str, count: int) -> list[dict] | None:
-    """Attempt to parse subtopics from unstructured text."""
+def _parse_cards_fallback(text: str, total_cards: int) -> list[dict] | None:
+    """Attempt to parse cards from unstructured text."""
     import re
     lines = text.strip().split("\n")
-    subtopics = []
+    cards = []
     pattern = re.compile(r"^\s*(?:\d+[.)]\s*)?(?:\*\*\s*)?(.+?)(?:\*\*\s*)?$")
 
     for line in lines:
@@ -964,46 +1049,47 @@ def _parse_subtopics_fallback(text: str, count: int) -> list[dict] | None:
         if match:
             title = match.group(1).strip()
             if len(title) > 3 and not title.lower().startswith(("here", "the ", "these", "below", "above")):
-                subtopics.append(title)
+                cards.append(title)
 
-    if len(subtopics) >= count:
-        return [{"id": i + 1, "title": subtopics[i], "angle": "", "research_info": "", "search_query": ""} for i in range(count)]
-    elif len(subtopics) > 0:
-        return [{"id": i + 1, "title": subtopics[i], "angle": "", "research_info": "", "search_query": ""} for i in range(len(subtopics))]
+    if len(cards) >= total_cards:
+        return [{"id": i + 1, "type": "beginning" if i == 0 else "end" if i == total_cards - 1 else "middle", "title": cards[i], "angle": "", "ammo": ""} for i in range(total_cards)]
+    elif len(cards) > 0:
+        return [{"id": i + 1, "type": "beginning" if i == 0 else "end" if i == len(cards) - 1 else "middle", "title": cards[i], "angle": "", "ammo": ""} for i in range(len(cards))]
     return None
 
 
-# --- Step 2: Subtopic Research ---
-
-# User message suffix appended to Step 1 fields — single source of truth
-STEP2_USER_MESSAGE_SUFFIX = (
-    "CRITICAL: Use Google Search now. Find the evidence described above. "
-    "200 WORDS MAX. Bullet-style evidence, not prose. One fact per line. "
-    "Each line must cite a source. No filler, no background, no introductions."
-)
+# --- Step 2: Draft Writing ---
 
 STEP2_DEFAULT_PARAMS = {
-    "model": "gemini-2.5-flash-lite",
-    "temperature": 0.7,
-    "max_tokens": 1500,
+    "model": "claude-haiku-4-5",
+    "temperature": 1.0,
+    "max_tokens": 4096,
+    "thinking_budget": 1600,
+    "effort": "high",
     "system_prompt": (
-        "You are a research agent. You will be given a specific argument to prove. "
-        "You MUST use Google Search to find evidence. Everything you write must "
-        "come from search results, not your training data.\n\n"
-        "DO NOT WRITE A PAPER. You have a strict 200-word limit. "
-        "Write bullet-style evidence, not prose. One fact per line. "
-        "Every line must cite a source. Focus on proving the "
-        "argument with hard evidence: specific cases, documented incidents, "
-        "data points, expert analysis, investigative findings."
+        "You are a draft writer. You will be given an outline card with a type, title, angle, "
+        "and an ammunition braindump. Your job is to weave the ammunition into a compelling "
+        "first draft for this section of the article.\n\n"
+        "Use your thinking to:\n"
+        "1. Identify the strongest material in the ammo — what hits hardest?\n"
+        "2. Decide on the best opening sentence — hook the reader immediately.\n"
+        "3. Organize the flow — what order makes the argument land best?\n"
+        "4. Choose which evidence/arguments to lead with and which to save for later.\n"
+        "5. Figure out how to transition smoothly from the previous section and into the next.\n\n"
+        "Write in a persuasive, engaging voice. Make the argument with conviction. "
+        "Don't hedge, don't over-qualify, don't use academic throat-clearing. "
+        "This is a first draft — not final. Aim for quality and flow, not perfection.\n\n"
+        "Write ONLY the section content — no meta-commentary, no notes to yourself, "
+        "no \"here's a draft\" preambles. Just the draft text."
     ),
 }
 
 STEP2_MODELS = [
-    {"id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash-Lite (Fastest/Cheapest)"},
-    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash (Balanced)"},
-    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro (Most Capable)"},
-    {"id": "gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash-Lite"},
-    {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash (Best)"},
+    {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5 (Fastest)"},
+    {"id": "claude-sonnet-5", "name": "Claude Sonnet 5 (Balanced)"},
+    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+    {"id": "claude-opus-4-8", "name": "Claude Opus 4.8 (Most Capable)"},
+    {"id": "claude-fable-5", "name": "Claude Fable 5 (Best)"},
 ]
 
 
@@ -1036,7 +1122,7 @@ def get_step2_data() -> dict:
             with open(step_file) as f:
                 return json.load(f)
     return {
-        "research_results": [], "status": "idle", "last_run": None, "error": None,
+        "drafts": [], "status": "idle", "last_run": None, "error": None,
     }
 
 
@@ -1052,15 +1138,17 @@ def save_step2_data(data: dict) -> bool:
 
 
 class Step2DataUpdate(BaseModel):
-    research_results: list[dict] = []
+    drafts: list[dict] = []
     status: str = "idle"
     error: str | None = None
 
 
 class Step2ParamsUpdate(BaseModel):
-    model: str = "gemini-2.5-flash-lite"
-    temperature: float = 0.7
-    max_tokens: int = 8192
+    model: str = "claude-haiku-4-5"
+    temperature: float = 1.0
+    max_tokens: int = 4096
+    thinking_budget: int = 1600
+    effort: str = "high"
     system_prompt: str = ""
 
 
@@ -1076,7 +1164,7 @@ async def update_step2(body: Step2DataUpdate):
     data = body.model_dump()
     if not save_step2_data(data):
         return {"ok": False, "error": "No project loaded. Go to Project and create or load one first."}
-    log_entry("INFO", 2, f"Step 2 data updated. Research results: {len(data['research_results'])}")
+    log_entry("INFO", 2, f"Step 2 data updated. Drafts: {len(data['drafts'])}")
     return {"ok": True}
 
 
@@ -1085,7 +1173,6 @@ async def get_step2_params_route():
     """Get Step 2 parameters."""
     params = get_step2_params()
     params["available_models"] = STEP2_MODELS
-    params["user_message_suffix"] = STEP2_USER_MESSAGE_SUFFIX
     return params
 
 
@@ -1094,129 +1181,134 @@ async def update_step2_params(body: Step2ParamsUpdate):
     """Update Step 2 parameters."""
     params = body.model_dump()
     save_step2_params(params)
-    log_entry("INFO", 2, f"Step 2 params updated. Model: {params['model']}, Temp: {params['temperature']}")
+    log_entry("INFO", 2, f"Step 2 params updated. Model: {params['model']}, Temp: {params['temperature']}, Thinking budget: {params.get('thinking_budget', 0)}")
     return {"ok": True}
 
 
 @app.post("/api/step/2/run")
 async def run_step2():
-    """Execute Step 2: run Gemini grounded research for ALL subtopics sequentially."""
+    """Execute Step 2: draft ALL cards sequentially using Anthropic with thinking."""
     step1_data = get_step1_data()
     step2_data = get_step2_data()
-    subtopics = step1_data.get("subtopics", [])
+    cards = step1_data.get("cards", [])
 
     if not _current_project_path:
         return {"ok": False, "error": "No project loaded."}
 
-    if not subtopics:
-        return {"ok": False, "error": "No subtopics from Step 1. Run Step 1 first."}
+    if not cards:
+        return {"ok": False, "error": "No cards from Step 1. Run Step 1 first."}
 
-    # Initialize research results from Step 1 subtopics
-    step2_data["research_results"] = _init_research_results(subtopics)
+    # Initialize draft entries from Step 1 cards
+    step2_data["drafts"] = _init_draft_entries(cards)
     step2_data["status"] = "running"
     step2_data["error"] = None
     save_step2_data(step2_data)
 
-    log_entry("INFO", 2, f"Starting research for {len(subtopics)} subtopics")
+    log_entry("INFO", 2, f"Starting draft writing for {len(cards)} cards")
 
     # Run each sequentially
-    for i in range(len(step2_data["research_results"])):
-        await _research_single_topic(step2_data, i)
+    for i in range(len(step2_data["drafts"])):
+        await _draft_single_card(step2_data, i)
 
     _update_step2_aggregate_status(step2_data)
     save_step2_data(step2_data)
 
-    log_entry("INFO", 2, f"Step 2 research complete. Status: {step2_data['status']}")
-    return {"ok": True, "research_results": step2_data["research_results"]}
+    log_entry("INFO", 2, f"Step 2 drafting complete. Status: {step2_data['status']}")
+    return {"ok": True, "drafts": step2_data["drafts"]}
 
 
-@app.post("/api/step/2/run-topic/{topic_id}")
-async def run_step2_topic(topic_id: int):
-    """Execute Step 2: run Gemini grounded research for a SINGLE subtopic."""
+@app.post("/api/step/2/run-card/{card_id}")
+async def run_step2_card(card_id: int):
+    """Execute Step 2: draft a SINGLE card."""
     step2_data = get_step2_data()
-    results = step2_data.get("research_results", [])
+    drafts = step2_data.get("drafts", [])
 
-    idx = _find_result_index_by_topic_id(results, topic_id)
+    idx = _find_draft_index_by_card_id(drafts, card_id)
 
-    # Auto-create the result entry if it doesn't exist yet
+    # Auto-create the draft entry if it doesn't exist yet
     if idx is None:
         step1_data = get_step1_data()
-        subtopics = step1_data.get("subtopics", [])
-        st = next((s for s in subtopics if s.get("id") == topic_id), None)
-        if st is None:
-            log_entry("ERROR", 2, f"Topic ID {topic_id} not found in Step 1 subtopics either")
-            return {"ok": False, "error": f"Topic ID {topic_id} not found in Step 1 or Step 2."}
-        # Create new result entry from Step 1 subtopic
-        results.append({
-            "topic_id": topic_id,
-            "research_summary": "",
-            "sources": [],
+        cards = step1_data.get("cards", [])
+        card = next((c for c in cards if c.get("id") == card_id), None)
+        if card is None:
+            log_entry("ERROR", 2, f"Card ID {card_id} not found in Step 1 cards")
+            return {"ok": False, "error": f"Card ID {card_id} not found in Step 1 or Step 2."}
+        drafts.append({
+            "card_id": card_id,
+            "card_type": card.get("type", "middle"),
+            "card_title": card.get("title", ""),
+            "card_angle": card.get("angle", ""),
+            "card_ammo": card.get("ammo", ""),
+            "draft": "",
             "status": "idle",
             "error": None,
             "last_run": None,
         })
-        idx = len(results) - 1
-        step2_data["research_results"] = results
-        log_entry("INFO", 2, f"Auto-created research entry for topic #{topic_id}")
+        idx = len(drafts) - 1
+        step2_data["drafts"] = drafts
+        log_entry("INFO", 2, f"Auto-created draft entry for card #{card_id}")
 
     step2_data["status"] = "running"
-    results[idx]["status"] = "running"
-    results[idx]["error"] = None
+    drafts[idx]["status"] = "running"
+    drafts[idx]["error"] = None
     save_step2_data(step2_data)
 
-    log_entry("INFO", 2, f"Researching subtopic #{topic_id}")
+    log_entry("INFO", 2, f"Drafting card #{card_id}")
 
-    await _research_single_topic(step2_data, idx)
+    await _draft_single_card(step2_data, idx)
 
     _update_step2_aggregate_status(step2_data)
     save_step2_data(step2_data)
 
-    return {"ok": True, "result": results[idx]}
+    return {"ok": True, "draft": drafts[idx]}
 
 
 # --- Step 2 Core Functions ---
 
 
-def _init_research_results(subtopics: list[dict]) -> list[dict]:
-    """Create research result entries from Step 1 subtopics, preserving completed results."""
+def _init_draft_entries(cards: list[dict]) -> list[dict]:
+    """Create draft entries from Step 1 cards, preserving completed drafts."""
     existing = {}
     step2_data = get_step2_data()
-    for r in step2_data.get("research_results", []):
-        existing[r.get("topic_id")] = r
+    for d in step2_data.get("drafts", []):
+        existing[d.get("card_id")] = d
 
-    results = []
-    for st in subtopics:
-        tid = st.get("id")
-        if tid in existing and existing[tid].get("status") == "completed":
-            results.append(existing[tid])
+    drafts = []
+    for card in cards:
+        cid = card.get("id")
+        if cid in existing and existing[cid].get("status") == "completed":
+            drafts.append(existing[cid])
         else:
-            results.append({
-                "topic_id": tid,
-                "research_summary": existing[tid].get("research_summary", "") if tid in existing else "",
-                "sources": existing[tid].get("sources", []) if tid in existing else [],
+            drafts.append({
+                "card_id": cid,
+                "card_type": card.get("type", "middle"),
+                "card_title": card.get("title", ""),
+                "card_angle": card.get("angle", ""),
+                "card_ammo": card.get("ammo", ""),
+                "draft": existing[cid].get("draft", "") if cid in existing else "",
                 "status": "idle",
                 "error": None,
-                "last_run": existing[tid].get("last_run") if tid in existing else None,
+                "last_run": existing[cid].get("last_run") if cid in existing else None,
             })
-    return results
+    return drafts
 
 
-def _find_result_index_by_topic_id(results: list[dict], topic_id: int) -> int | None:
-    """Find the index of a research result by its topic_id."""
-    for i, r in enumerate(results):
-        if r.get("topic_id") == topic_id:
+def _find_draft_index_by_card_id(drafts: list[dict], card_id: int) -> int | None:
+    """Find the index of a draft entry by its card_id."""
+    for i, d in enumerate(drafts):
+        if d.get("card_id") == card_id:
             return i
     return None
 
 
 def _update_step2_aggregate_status(step2_data: dict) -> None:
-    """Update the top-level status based on individual result statuses."""
-    results = step2_data.get("research_results", [])
-    if not results:
+    """Update the top-level status based on individual draft statuses."""
+    drafts = step2_data.get("drafts", [])
+    if not drafts:
         step2_data["status"] = "idle"
         return
 
-    statuses = [r.get("status", "idle") for r in results]
+    statuses = [d.get("status", "idle") for d in drafts]
     if any(s == "running" for s in statuses):
         step2_data["status"] = "running"
     elif all(s == "completed" for s in statuses):
@@ -1230,325 +1322,476 @@ def _update_step2_aggregate_status(step2_data: dict) -> None:
         step2_data["status"] = "idle"
 
 
-async def _research_single_topic(step2_data: dict, idx: int) -> None:
-    """Run grounded Google Search research for one subtopic with retry logic."""
+async def _draft_single_card(step2_data: dict, idx: int) -> None:
+    """Write a first draft for one card using Anthropic with extended thinking. Retries once on failure."""
     import httpx
     import asyncio
 
-    result = step2_data["research_results"][idx]
+    draft_entry = step2_data["drafts"][idx]
     params = get_step2_params()
     settings = load_settings()
 
-    api_key = settings.get("gemini_key", "").strip()
+    api_key = settings.get("anthropic_key", "").strip()
     if not api_key:
-        result["status"] = "failed"
-        result["error"] = "No Gemini API key configured. Go to Settings to add one."
+        draft_entry["status"] = "failed"
+        draft_entry["error"] = "No Anthropic API key configured. Go to Settings to add one."
         save_step2_data(step2_data)
         return
 
-    model = params.get("model", "gemini-2.5-flash-lite")
-    temperature = params.get("temperature", 0.7)
-    max_tokens = params.get("max_tokens", 8192)
+    model = params.get("model", "claude-haiku-4-5")
+    temperature = params.get("temperature", 1.0)
+    max_tokens = params.get("max_tokens", 4096)
+    thinking_budget = params.get("thinking_budget", 1600)
+    effort = params.get("effort", "high")
     system_prompt = params.get("system_prompt", STEP2_DEFAULT_PARAMS["system_prompt"])
 
-    # Pull Step 1 subtopic fields for the prompt
-    topic_id = result.get("topic_id")
-    step1_data = get_step1_data()
-    st_fields = {}
-    for st in step1_data.get("subtopics", []):
-        if st.get("id") == topic_id:
-            st_fields = st
-            break
+    # Build user message — only the info the model needs for THIS card
+    card_type = draft_entry.get("card_type", "middle")
+    card_title = draft_entry.get("card_title", "")
+    card_angle = draft_entry.get("card_angle", "")
+    card_ammo = draft_entry.get("card_ammo", "")
 
-    # Build user message from Step 1 subtopic fields
     user_message = (
-        f"ARGUMENT TO PROVE: {st_fields.get('angle', '')}\n"
-        f"WHAT TO DIG FOR: {st_fields.get('research_info', '')}\n"
-        f"SEARCH: {st_fields.get('search_query', '')}\n"
-        f"TITLE: {st_fields.get('title', '')}\n\n"
-        f"{STEP2_USER_MESSAGE_SUFFIX}"
+        f"CARD TYPE: {card_type}\n"
+        f"TITLE: {card_title}\n"
+        f"ANGLE: {card_angle}\n\n"
+        f"AMMUNITION:\n{card_ammo}\n\n"
+        f"Write the first draft for this section."
     )
 
-    # Log the full prompt being sent so the user can inspect it
     log_entry("INFO", 2, (
-        f"Prompt for subtopic #{topic_id}:\n"
-        f"--- SYSTEM ---\n{system_prompt[:500]}...\n"
-        f"--- USER ---\n{user_message}"
+        f"Prompt for card #{draft_entry.get('card_id')}:\n"
+        f"--- SYSTEM ---\n{system_prompt[:300]}...\n"
+        f"--- USER ---\n{user_message[:500]}..."
     ))
 
-    # Build request body
-    is_gemini3 = model.startswith("gemini-3")
-
-    request_body = {
-        "system_instruction": {
-            "parts": [{"text": system_prompt}]
-        },
-        "contents": [
-            {"role": "user", "parts": [{"text": user_message}]}
-        ],
-        "tools": [{"google_search": {}}],
-        "generationConfig": {
-            "temperature": temperature,
-            "maxOutputTokens": max_tokens,
-        },
-    }
-
-    # Gemini 3+ supports responseFormat + google_search together; 2.5 does not
-    if is_gemini3:
-        request_body["generationConfig"]["responseFormat"] = {
-            "type": "application/json",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "research_summary": {"type": "string"},
-                    "sources": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "url": {"type": "string"},
-                                "title": {"type": "string"},
-                            },
-                            "required": ["url", "title"],
-                        },
-                    },
-                },
-                "required": ["research_summary", "sources"],
-                "additionalProperties": False,
-            },
+    # Build model-appropriate thinking config
+    # Haiku 4.5: uses budget_tokens, temp must be 1.0, no effort
+    # Sonnet 5 / Opus 4.8 / Fable 5: uses adaptive thinking + effort, no temp restriction
+    is_haiku = model.startswith("claude-haiku")
+    if is_haiku:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": 1.0,  # required for thinking on Haiku
+            "system": system_prompt,
+            "thinking": {"type": "enabled", "budget_tokens": thinking_budget},
+            "messages": [{"role": "user", "content": user_message}],
         }
-
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    headers = {
-        "x-goog-api-key": api_key,
-        "content-type": "application/json",
-    }
-
-    log_entry("INFO", 2, f"Researching subtopic #{result.get('topic_id')} with {model}")
+        log_entry("INFO", 2, f"Drafting card #{draft_entry.get('card_id')} with {model} (thinking budget: {thinking_budget})")
+    else:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_prompt,
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": effort},
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        log_entry("INFO", 2, f"Drafting card #{draft_entry.get('card_id')} with {model} (adaptive thinking, effort: {effort})")
 
     # Attempt 1
-    success = await _call_gemini(step2_data, idx, endpoint, headers, request_body, attempt=1, is_gemini3=is_gemini3)
+    success = await _call_anthropic_draft(step2_data, idx, api_key, request_body, attempt=1)
 
     # Retry after 3s delay on failure
     if not success:
-        log_entry("WARN", 2, f"Subtopic #{result.get('topic_id')} failed attempt 1. Retrying in 3s...")
+        log_entry("WARN", 2, f"Card #{draft_entry.get('card_id')} failed attempt 1. Retrying in 3s...")
         await asyncio.sleep(3)
-        success = await _call_gemini(step2_data, idx, endpoint, headers, request_body, attempt=2, is_gemini3=is_gemini3)
+        success = await _call_anthropic_draft(step2_data, idx, api_key, request_body, attempt=2)
 
     if success:
-        result["status"] = "completed"
-        result["last_run"] = dt.datetime.now().isoformat()
-        log_entry("INFO", 2, f"Subtopic #{result.get('topic_id')} research completed")
-    # If failed, status is already set to "failed" by _call_gemini
+        draft_entry["status"] = "completed"
+        draft_entry["last_run"] = dt.datetime.now().isoformat()
+        log_entry("INFO", 2, f"Card #{draft_entry.get('card_id')} draft completed")
+    # If failed, status is already set to "failed" by _call_anthropic_draft
 
 
-async def _call_gemini(
-    step2_data: dict, idx: int, endpoint: str, headers: dict,
-    request_body: dict, attempt: int, is_gemini3: bool = False,
+async def _call_anthropic_draft(
+    step2_data: dict, idx: int, api_key: str,
+    request_body: dict, attempt: int,
 ) -> bool:
-    """Make a single Gemini API call. Returns True on success, False on failure."""
+    """Make a single Anthropic API call for drafting. Returns True on success, False on failure."""
     import httpx
 
-    result = step2_data["research_results"][idx]
+    draft_entry = step2_data["drafts"][idx]
 
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(endpoint, headers=headers, json=request_body)
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json=request_body,
+            )
 
             if resp.status_code == 200:
-                resp_data = resp.json()
-                candidates = resp_data.get("candidates", [])
-                if not candidates:
-                    result["status"] = "failed"
-                    result["error"] = "Empty response from Gemini (no candidates returned)"
-                    save_step2_data(step2_data)
-                    return False
-
-                content = candidates[0].get("content", {})
-                parts = content.get("parts", [])
-
-                # Extract text from parts — check both "text" key and direct string values
+                result = resp.json()
+                content_blocks = result.get("content", [])
                 response_text = ""
-                for part in parts:
-                    if "text" in part:
-                        response_text += part["text"]
-                    elif isinstance(part, str):
-                        response_text += part
+                for block in content_blocks:
+                    if block.get("type") == "text":
+                        response_text += block.get("text", "")
 
-                # If still no text, try top-level text field on content
-                if not response_text:
-                    response_text = content.get("text", "")
-
-                # Extract sources from THREE places:
-                # 1. Inline url_citation annotations on parts
-                # 2. groundingMetadata.groundingChunks (generateContent API)
-                # 3. groundingMetadata.groundingSupports
-                sources = []
-                seen_urls = set()
-
-                # Format 1: Inline annotations on parts
-                for part in parts:
-                    for ann in part.get("annotations", []):
-                        if ann.get("type") == "url_citation":
-                            url = ann.get("url", "").strip()
-                            if url and url not in seen_urls:
-                                seen_urls.add(url)
-                                sources.append({
-                                    "url": url,
-                                    "title": ann.get("title", ""),
-                                })
-
-                # Format 2: groundingMetadata.groundingChunks
-                grounding = candidates[0].get("groundingMetadata", {})
-                for chunk in grounding.get("groundingChunks", []):
-                    web = chunk.get("web", {})
-                    url = web.get("uri", "").strip()
-                    if url and url not in seen_urls:
-                        seen_urls.add(url)
-                        sources.append({
-                            "url": url,
-                            "title": web.get("title", ""),
-                        })
-
-                # Format 3: groundingMetadata.groundingSupports
-                for gs in grounding.get("groundingSupports", []):
-                    for seg in gs.get("segment", []):
-                        # segment might contain citation info
-                        pass
-
-                # Always save sources from grounding metadata
-                if sources:
-                    result["sources"] = sources
-
-                # For Gemini 3+ with responseFormat, try JSON parse first
-                # For 2.5 models (no responseFormat), use raw text directly
-                if is_gemini3:
-                    parsed = _parse_gemini_json(response_text)
-                    if parsed and "research_summary" in parsed:
-                        result["research_summary"] = parsed["research_summary"]
-                        for s in parsed.get("sources", []):
-                            url = (s.get("url") or "").strip()
-                            if url and url not in seen_urls:
-                                seen_urls.add(url)
-                                sources.append({"url": url, "title": s.get("title", "")})
-                        result["sources"] = sources
-                        save_step2_data(step2_data)
-                        log_entry("INFO", 2, (
-                            f"Subtopic #{result.get('topic_id')} — "
-                            f"summary {len(parsed['research_summary'])} chars, "
-                            f"{len(sources)} sources"
-                        ))
-                        return True
-                    # Fall through to use raw text if JSON parse fails
-
-                # 2.5 models or JSON parse failed: use raw response text as research_summary
                 if response_text.strip():
-                    result["research_summary"] = response_text.strip()
-                    result["sources"] = sources
-                    result["status"] = "completed"
+                    draft_entry["draft"] = response_text.strip()
                     save_step2_data(step2_data)
-                    usage = resp_data.get("usageMetadata", {})
+                    usage = result.get("usage", {})
                     log_entry("INFO", 2, (
-                        f"Subtopic #{result.get('topic_id')} — "
-                        f"summary {len(response_text)} chars (raw text), "
-                        f"{len(sources)} sources from grounding, "
-                        f"toolUsePromptTokenCount={usage.get('toolUsePromptTokenCount', 'N/A')}, "
-                        f"candidatesTokenCount={usage.get('candidatesTokenCount', 'N/A')}, "
-                        f"groundingChunks={len(grounding.get('groundingChunks', []))}"
+                        f"Card #{draft_entry.get('card_id')} — "
+                        f"draft {len(response_text)} chars, "
+                        f"input_tokens={usage.get('input_tokens', 'N/A')}, "
+                        f"output_tokens={usage.get('output_tokens', 'N/A')}"
                     ))
                     return True
-
-                # No text at all — model generated nothing
-                result["status"] = "failed"
-                result["error"] = (
-                    f"Gemini returned no text (attempt {attempt}). "
-                    f"Parts: {len(parts)}, grounding chunks: {len(sources)}"
-                )
-                # Save sources even on failure
-                save_step2_data(step2_data)
-                log_entry("ERROR", 2, (
-                    f"Subtopic #{result.get('topic_id')} — empty response (attempt {attempt}). "
-                    f"parts_count={len(parts)}, "
-                    f"content_keys={list(content.keys())}, "
-                    f"candidate_keys={list(candidates[0].keys())}, "
-                    f"sources_from_grounding={len(sources)}"
-                ))
-                return False
+                else:
+                    draft_entry["status"] = "failed"
+                    draft_entry["error"] = f"Model returned empty response (attempt {attempt})"
+                    save_step2_data(step2_data)
+                    log_entry("ERROR", 2, f"Card #{draft_entry.get('card_id')} — empty response (attempt {attempt})")
+                    return False
 
             else:
-                error_detail = _extract_gemini_error(resp)
-                log_entry("ERROR", 2, f"Gemini API error ({resp.status_code}) attempt {attempt}: {error_detail}")
+                error_detail = "Unknown error"
+                try:
+                    err_data = resp.json()
+                    err = err_data.get("error", {})
+                    error_detail = err.get("message", resp.text[:500])
+                except Exception:
+                    error_detail = resp.text[:500]
 
-                result["status"] = "failed"
+                log_entry("ERROR", 2, f"Anthropic API error ({resp.status_code}) attempt {attempt}: {error_detail}")
+
+                draft_entry["status"] = "failed"
                 if resp.status_code == 401:
-                    result["error"] = "Authentication failed. Check your Gemini API key in Settings."
+                    draft_entry["error"] = "Authentication failed. Check your Anthropic API key in Settings."
                 elif resp.status_code == 403:
-                    result["error"] = "Access denied. Your API key may not have permission for this model or Google Search grounding."
+                    draft_entry["error"] = "Access denied. Your API key may not have permission for this model."
                 elif resp.status_code == 429:
-                    result["error"] = f"Rate limited (attempt {attempt}). The model is busy — try again in a moment."
+                    draft_entry["error"] = f"Rate limited (attempt {attempt}). Wait a moment and try again."
                 elif resp.status_code == 400:
-                    result["error"] = f"Bad request (attempt {attempt}): {error_detail}"
+                    draft_entry["error"] = f"Bad request (attempt {attempt}): {error_detail}"
                 elif resp.status_code == 503:
-                    result["error"] = f"Service unavailable (attempt {attempt}). Gemini may be overloaded — try again shortly."
+                    draft_entry["error"] = f"Service unavailable (attempt {attempt}). Try again shortly."
                 else:
-                    result["error"] = f"API error ({resp.status_code}) attempt {attempt}: {error_detail}"
+                    draft_entry["error"] = f"API error ({resp.status_code}) attempt {attempt}: {error_detail}"
                 save_step2_data(step2_data)
                 return False
 
     except httpx.TimeoutException:
-        result["status"] = "failed"
-        result["error"] = f"Request timed out after 120s (attempt {attempt})"
+        draft_entry["status"] = "failed"
+        draft_entry["error"] = f"Request timed out after 120s (attempt {attempt})"
         save_step2_data(step2_data)
-        log_entry("ERROR", 2, f"Gemini timeout on attempt {attempt} for subtopic #{result.get('topic_id')}")
+        log_entry("ERROR", 2, f"Anthropic timeout on attempt {attempt} for card #{draft_entry.get('card_id')}")
         return False
 
     except Exception as e:
-        result["status"] = "failed"
-        result["error"] = f"Unexpected error (attempt {attempt}): {str(e)}"
+        draft_entry["status"] = "failed"
+        draft_entry["error"] = f"Unexpected error (attempt {attempt}): {str(e)}"
         save_step2_data(step2_data)
-        log_entry("ERROR", 2, f"Gemini unexpected error attempt {attempt}: {str(e)}")
+        log_entry("ERROR", 2, f"Anthropic unexpected error attempt {attempt}: {str(e)}")
         return False
 
 
-def _parse_gemini_json(text: str) -> dict | None:
-    """Parse JSON from Gemini response text. Handles markdown fences and common issues."""
-    import re
+# --- Step 3: Article Synthesis ---
 
-    if not text or not text.strip():
-        return None
+STEP3_DEFAULT_PARAMS = {
+    "model": "claude-haiku-4-5",
+    "temperature": 1.0,
+    "max_tokens": 8192,
+    "thinking_budget": 1600,
+    "effort": "high",
+    "system_prompt": (
+        "You are a masterful article editor and writer. You will receive a set of draft sections "
+        "written by a draft writer — one section per card in an outline. Your job is to synthesize "
+        "them into one cohesive, compelling, finished article.\n\n"
+        "This is not just copy-paste stitching. You must:\n"
+        "1. Weave the sections together so they flow naturally — one idea leading into the next. "
+        "Fix any abrupt transitions. Make it feel like a single voice wrote the entire piece.\n"
+        "2. Add style, tone, and personality. Be witty, observational, attention-grabbing. "
+        "Be interesting. Be funny where appropriate. Don't be dry or academic — this should "
+        "read like a great magazine feature or a smart, opinionated newsletter.\n"
+        "3. Strengthen the opening hook — the first paragraph must grab the reader and make "
+        "them need to keep reading. Strengthen the closing — leave the reader with something "
+        "to think about, a shift in perspective, or a memorable final image.\n"
+        "4. Cut filler. Tighten weak sentences. If a paragraph drags, compress it or kill it. "
+        "Every sentence should earn its place.\n"
+        "5. Keep the substance. The draft sections contain arguments, evidence, and ideas — "
+        "don't lose them. Your job is to elevate the presentation, not gut the content.\n"
+        "6. Match the structure to the content. Use paragraph breaks, rhythm, and pacing to "
+        "keep the reader engaged. Vary sentence length. Read like a human wrote it for humans.\n\n"
+        "Output the full article — no meta-commentary, no notes to yourself, no \"here's the "
+        "final draft\" preamble. Just the article text, ready to publish."
+    ),
+}
 
-    # Try direct parse first
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        pass
+STEP3_MODELS = [
+    {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5 (Fastest)"},
+    {"id": "claude-sonnet-5", "name": "Claude Sonnet 5 (Balanced)"},
+    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+    {"id": "claude-opus-4-8", "name": "Claude Opus 4.8 (Most Capable)"},
+    {"id": "claude-fable-5", "name": "Claude Fable 5 (Best)"},
+]
 
-    # Try extracting from ```json ... ``` fences
-    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-    if m:
+
+def get_step3_params() -> dict:
+    """Load Step 3 params from disk or return defaults."""
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step3_params.json"
+        if params_file.exists():
+            with open(params_file) as f:
+                return json.load(f)
+    return dict(STEP3_DEFAULT_PARAMS)
+
+
+def save_step3_params(params: dict) -> None:
+    """Persist Step 3 params to disk."""
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step3_params.json"
+        with open(params_file, "w") as f:
+            json.dump(params, f, indent=2)
+
+
+def get_step3_data() -> dict:
+    """Load Step 3 data from disk."""
+    global _current_project_path
+    if _current_project_path:
+        step_file = _current_project_path / "step3.json"
+        if step_file.exists():
+            with open(step_file) as f:
+                return json.load(f)
+    return {
+        "draft_article": "", "status": "idle", "last_run": None, "error": None,
+    }
+
+
+def save_step3_data(data: dict) -> bool:
+    """Persist Step 3 data to disk. Returns False if no project is loaded."""
+    global _current_project_path
+    if not _current_project_path:
+        return False
+    step_file = _current_project_path / "step3.json"
+    with open(step_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return True
+
+
+class Step3DataUpdate(BaseModel):
+    draft_article: str = ""
+    status: str = "idle"
+    error: str | None = None
+
+
+class Step3ParamsUpdate(BaseModel):
+    model: str = "claude-haiku-4-5"
+    temperature: float = 1.0
+    max_tokens: int = 8192
+    thinking_budget: int = 1600
+    effort: str = "high"
+    system_prompt: str = ""
+
+
+@app.get("/api/step/3/data")
+async def get_step3():
+    """Get Step 3 stored data."""
+    return get_step3_data()
+
+
+@app.put("/api/step/3/data")
+async def update_step3(body: Step3DataUpdate):
+    """Update Step 3 data (manual edit)."""
+    data = body.model_dump()
+    if not save_step3_data(data):
+        return {"ok": False, "error": "No project loaded. Go to Project and create or load one first."}
+    log_entry("INFO", 3, f"Step 3 data updated. Article length: {len(data.get('draft_article', ''))}")
+    return {"ok": True}
+
+
+@app.get("/api/step/3/params")
+async def get_step3_params_route():
+    """Get Step 3 parameters."""
+    params = get_step3_params()
+    params["available_models"] = STEP3_MODELS
+    return params
+
+
+@app.put("/api/step/3/params")
+async def update_step3_params(body: Step3ParamsUpdate):
+    """Update Step 3 parameters."""
+    params = body.model_dump()
+    save_step3_params(params)
+    log_entry("INFO", 3, f"Step 3 params updated. Model: {params['model']}, Temp: {params['temperature']}, Thinking budget: {params.get('thinking_budget', 0)}")
+    return {"ok": True}
+
+
+@app.post("/api/step/3/run")
+async def run_step3():
+    """Execute Step 3: synthesize all Step 2 drafts into a final article."""
+    import httpx
+    import asyncio
+
+    step2_data = get_step2_data()
+    step3_data = get_step3_data()
+    params = get_step3_params()
+    settings = load_settings()
+
+    if not _current_project_path:
+        return {"ok": False, "error": "No project loaded."}
+
+    # Validate Step 2 is done
+    drafts = step2_data.get("drafts", [])
+    if not drafts:
+        return {"ok": False, "error": "No drafts from Step 2. Run Step 2 first."}
+
+    all_completed = all(d.get("status") == "completed" for d in drafts)
+    if not all_completed:
+        pending = [d.get("card_title", f"Card #{d.get('card_id')}") for d in drafts if d.get("status") != "completed"]
+        return {"ok": False, "error": f"Not all drafts are completed. Still pending: {', '.join(pending[:5])}"}
+
+    api_key = settings.get("anthropic_key", "").strip()
+    if not api_key:
+        step3_data["status"] = "failed"
+        step3_data["error"] = "No Anthropic API key configured. Go to Settings to add one."
+        save_step3_data(step3_data)
+        return {"ok": False, "error": step3_data["error"]}
+
+    step3_data["status"] = "running"
+    step3_data["error"] = None
+    save_step3_data(step3_data)
+
+    model = params.get("model", "claude-haiku-4-5")
+    temperature = params.get("temperature", 1.0)
+    max_tokens = params.get("max_tokens", 8192)
+    thinking_budget = params.get("thinking_budget", 1600)
+    effort = params.get("effort", "high")
+    system_prompt = params.get("system_prompt", STEP3_DEFAULT_PARAMS["system_prompt"])
+
+    # Build user message — stitch all drafts together
+    sections = []
+    for i, d in enumerate(drafts, 1):
+        card_type = d.get("card_type", "middle")
+        card_title = d.get("card_title", "")
+        draft_text = d.get("draft", "")
+        sections.append(
+            f"SECTION {i}: {card_type.upper()} — {card_title}\n\n{draft_text}"
+        )
+    stitched = "\n\n---\n\n".join(sections)
+
+    user_message = (
+        f"You have {len(drafts)} draft sections written by a draft writer. "
+        f"Your job is to synthesize them into one cohesive, compelling final article.\n\n"
+        f"DRAFT SECTIONS:\n\n{stitched}\n\n"
+        f"---\n\n"
+        f"Synthesize these into the final article now. Weave them together with style, "
+        f"wit, and a strong narrative arc. Make it read like one voice. "
+        f"Fix transitions. Tighten where needed. Strengthen the opening and closing. "
+        f"Output the full article — nothing else."
+    )
+
+    log_entry("INFO", 3, (
+        f"Synthesizing {len(drafts)} drafts into final article.\n"
+        f"--- SYSTEM ---\n{system_prompt[:300]}...\n"
+        f"--- USER ---\n{user_message[:500]}..."
+    ))
+
+    # Build model-appropriate thinking config
+    is_haiku = model.startswith("claude-haiku")
+    if is_haiku:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": 1.0,
+            "system": system_prompt,
+            "thinking": {"type": "enabled", "budget_tokens": thinking_budget},
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        log_entry("INFO", 3, f"Synthesizing with {model} (thinking budget: {thinking_budget})")
+    else:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_prompt,
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": effort},
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        log_entry("INFO", 3, f"Synthesizing with {model} (adaptive thinking, effort: {effort})")
+
+    # Retry loop — 2 attempts
+    success = False
+    for attempt in range(1, 3):
         try:
-            return json.loads(m.group(1).strip())
-        except json.JSONDecodeError:
-            pass
+            async with httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json=request_body,
+                )
 
-    # Try finding first { to last } brace pair
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group(0))
-        except json.JSONDecodeError:
-            pass
+            if resp.status_code == 200:
+                result = resp.json()
+                content_blocks = result.get("content", [])
+                response_text = ""
+                for block in content_blocks:
+                    if block.get("type") == "text":
+                        response_text += block.get("text", "")
 
-    return None
+                if response_text.strip():
+                    step3_data["draft_article"] = response_text.strip()
+                    step3_data["status"] = "completed"
+                    step3_data["last_run"] = dt.datetime.now().isoformat()
+                    step3_data["error"] = None
+                    save_step3_data(step3_data)
+                    usage = result.get("usage", {})
+                    log_entry("INFO", 3, (
+                        f"Step 3 completed — article {len(response_text)} chars, "
+                        f"input_tokens={usage.get('input_tokens', 'N/A')}, "
+                        f"output_tokens={usage.get('output_tokens', 'N/A')}"
+                    ))
+                    return {"ok": True, "draft_article": step3_data["draft_article"]}
+                else:
+                    log_entry("ERROR", 3, f"Step 3 — empty response (attempt {attempt})")
+                    step3_data["status"] = "failed"
+                    step3_data["error"] = f"Model returned empty response (attempt {attempt})"
+            else:
+                error_detail = "Unknown error"
+                try:
+                    err_data = resp.json()
+                    err = err_data.get("error", {})
+                    error_detail = err.get("message", resp.text[:500])
+                except Exception:
+                    error_detail = resp.text[:500]
 
+                log_entry("ERROR", 3, f"Anthropic API error ({resp.status_code}) attempt {attempt}: {error_detail}")
+                step3_data["status"] = "failed"
+                step3_data["error"] = f"API error ({resp.status_code}) attempt {attempt}: {error_detail}"
 
-def _extract_gemini_error(resp) -> str:
-    """Extract error message from a Gemini error response."""
-    try:
-        err_data = resp.json()
-        return err_data.get("error", {}).get("message", resp.text[:500])
-    except Exception:
-        return resp.text[:500]
+        except httpx.TimeoutException:
+            log_entry("ERROR", 3, f"Anthropic timeout on attempt {attempt}")
+            step3_data["status"] = "failed"
+            step3_data["error"] = f"Request timed out after 180s (attempt {attempt})"
+        except Exception as e:
+            log_entry("ERROR", 3, f"Anthropic unexpected error attempt {attempt}: {str(e)}")
+            step3_data["status"] = "failed"
+            step3_data["error"] = f"Unexpected error (attempt {attempt}): {str(e)}"
+
+        # Retry with delay if not last attempt
+        if attempt == 1:
+            log_entry("WARN", 3, "Step 3 failed attempt 1. Retrying in 3s...")
+            await asyncio.sleep(3)
+
+    save_step3_data(step3_data)
+    return {"ok": False, "error": step3_data["error"]}
 
 
 if __name__ == "__main__":

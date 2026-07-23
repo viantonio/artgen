@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Step 3: Article Draft — ArtGen</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <nav id="sidebar">
+            <h1>⚡ ArtGen</h1>
+            <div class="project-name" id="sidebar-project-name">No project</div>
+            <div class="nav-section">Pipeline</div>
+            <a href="/"><span class="step-dot" id="dot-step0"></span>0. Project</a>
+            <a href="/step/1" class="step-link"><span class="step-dot idle" id="dot-step1"></span>1. Outline</a>
+            <a href="/step/2" class="step-link"><span class="step-dot idle" id="dot-step2"></span>2. Draft</a>
+            <a href="/step/3" class="active step-link"><span class="step-dot idle" id="dot-step3"></span>3. Article Draft</a>
+            <a href="/step/4" class="step-link"><span class="step-dot idle" id="dot-step4"></span>4. Style Rewrite</a>
+            <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Images</a>
+            <div class="nav-section">System</div>
+            <a href="/settings">⚙ Settings</a>
+            <a href="/log">📋 System Log</a>
+        </nav>
+
+        <div id="main">
+            <div id="content">
+                <div class="page-header">
+                    <h1>Step 3: Article Draft</h1>
+                    <p>Synthesize all draft sections into one cohesive final article with style and voice</p>
+                </div>
+
+                <!-- Parameters Card -->
+                <div class="card">
+                    <h2>⚙ Model & Parameters</h2>
+                    <div class="form-group">
+                        <label for="step3-model">Model</label>
+                        <select id="step3-model"></select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="step3-temperature">Temperature: <span id="temp-value">1.0</span></label>
+                            <input type="range" id="step3-temperature" min="0" max="2" step="0.1" value="1.0">
+                        </div>
+                        <div class="form-group">
+                            <label for="step3-max-tokens">Max Tokens</label>
+                            <input type="number" id="step3-max-tokens" value="8192" min="100" max="65536">
+                        </div>
+                    </div>
+                    <div class="form-group" id="step3-thinking-budget-group">
+                        <label for="step3-thinking-budget">Thinking Budget (tokens)</label>
+                        <input type="number" id="step3-thinking-budget" value="1600" min="256" max="32768">
+                        <p style="font-size:11px; color:var(--text-secondary); margin-top:4px;">Haiku 4.5 only — tokens reserved for extended thinking.</p>
+                    </div>
+                    <div class="form-group" id="step3-effort-group" style="display:none;">
+                        <label for="step3-effort">Effort</label>
+                        <select id="step3-effort">
+                            <option value="low">Low — fast, cheaper</option>
+                            <option value="medium">Medium — balanced</option>
+                            <option value="high" selected>High — thorough (default)</option>
+                            <option value="xhigh">X-High — best for coding/agentic</option>
+                            <option value="max">Max — correctness over cost</option>
+                        </select>
+                        <p style="font-size:11px; color:var(--text-secondary); margin-top:4px;">Sonnet 5 / Opus 4.8 only — controls thinking depth and token spend.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="step3-system-prompt">System Prompt</label>
+                        <textarea id="step3-system-prompt" rows="8"></textarea>
+                    </div>
+                    <button id="step3-save-params-btn" class="secondary">Save Parameters</button>
+                    <span id="step3-params-status"></span>
+                </div>
+
+                <div id="step3-error" style="display:none;"></div>
+
+                <!-- Run -->
+                <div class="card" id="step3-controls-card" style="display:none;">
+                    <h2>Synthesize Article</h2>
+                    <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">
+                        Takes all completed drafts from Step 2 and synthesizes them into one cohesive final article.
+                        The model will add style, tone, and voice — making it witty, observational, and engaging.
+                    </p>
+                    <button id="step3-run-btn">✍️ Synthesize Article</button>
+                    <span id="step3-run-status"></span>
+                </div>
+
+                <!-- Validation message — Step 2 not complete -->
+                <div class="card" id="step3-gated-card" style="display:none;">
+                    <h2>⏳ Waiting for Step 2</h2>
+                    <p style="color:var(--text-secondary)">
+                        All draft sections from Step 2 must be completed before you can synthesize the final article.
+                        <span id="step3-gated-status"></span>
+                    </p>
+                </div>
+
+                <!-- Article Output -->
+                <div class="card" id="step3-output-card" style="display:none;">
+                    <h2>Final Article</h2>
+                    <div id="step3-output">
+                        <p style="color:var(--text-secondary)">Click "Synthesize Article" to generate the final draft.</p>
+                    </div>
+                </div>
+            </div>
+            <div id="log-widget-header">
+                <span><button id="toggle-log-btn" class="toggle-log-btn">▶ Show</button> System Log</span>
+                <a href="/log">View Full Log →</a>
+            </div>
+            <div id="log-widget"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/sidebar.js"></script>
+    <script src="/static/js/log.js"></script>
+    <script src="/static/js/step3.js"></script>
+</body>
+</html>

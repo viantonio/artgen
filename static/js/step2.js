@@ -1,8 +1,7 @@
-// Step 2: Subtopic Research UI
+// Step 2: Draft Writing UI
 
 let _currentSystemPrompt = '';
 let _currentModel = '';
-let _userMessageSuffix = '';
 
 document.addEventListener('DOMContentLoaded', () => {
     initStep2();
@@ -12,7 +11,7 @@ async function initStep2() {
     await loadStep2Params();
     await loadStep2Data();
 
-    document.getElementById('step2-run-all-btn').addEventListener('click', runAllResearch);
+    document.getElementById('step2-run-all-btn').addEventListener('click', runAllDrafts);
     document.getElementById('step2-save-params-btn').addEventListener('click', saveParams);
     document.getElementById('step2-temperature').addEventListener('input', (e) => {
         document.getElementById('temp-value').textContent = parseFloat(e.target.value).toFixed(1);
@@ -21,10 +20,13 @@ async function initStep2() {
     // Auto-save params on change
     document.getElementById('step2-model').addEventListener('change', () => {
         _currentModel = document.getElementById('step2-model').value;
+        updateModelSpecificParams();
         autoSaveParams();
     });
     document.getElementById('step2-temperature').addEventListener('change', () => autoSaveParams());
     document.getElementById('step2-max-tokens').addEventListener('change', () => autoSaveParams());
+    document.getElementById('step2-thinking-budget').addEventListener('change', () => autoSaveParams());
+    document.getElementById('step2-effort').addEventListener('change', () => autoSaveParams());
 
     let systemPromptTimeout;
     document.getElementById('step2-system-prompt').addEventListener('input', () => {
@@ -43,13 +45,15 @@ async function loadStep2Params() {
             `<option value="${m.id}" ${m.id === params.model ? 'selected' : ''}>${m.name}</option>`
         ).join('');
 
-        _currentModel = params.model || 'gemini-2.5-flash-lite';
-        _userMessageSuffix = params.user_message_suffix || '';
-        document.getElementById('step2-temperature').value = params.temperature || 0.7;
-        document.getElementById('temp-value').textContent = (params.temperature || 0.7).toFixed(1);
-        document.getElementById('step2-max-tokens').value = params.max_tokens || 8192;
+        _currentModel = params.model || 'claude-haiku-4-5';
+        document.getElementById('step2-temperature').value = params.temperature || 1.0;
+        document.getElementById('temp-value').textContent = (params.temperature || 1.0).toFixed(1);
+        document.getElementById('step2-max-tokens').value = params.max_tokens || 4096;
+        document.getElementById('step2-thinking-budget').value = params.thinking_budget || 1600;
+        document.getElementById('step2-effort').value = params.effort || 'high';
         document.getElementById('step2-system-prompt').value = params.system_prompt || '';
         _currentSystemPrompt = params.system_prompt || '';
+        updateModelSpecificParams();
     } catch (e) {
         console.error('Failed to load Step 2 params:', e);
     }
@@ -59,23 +63,23 @@ async function loadStep2Data() {
     try {
         const step2 = await API.get('/api/step/2/data');
         const step1 = await API.get('/api/step/1/data');
-        const subtopics = step1.subtopics || [];
+        const cards = step1.cards || [];
 
         // Show/hide controls
         const controlsCard = document.getElementById('step2-controls-card');
-        controlsCard.style.display = subtopics.length > 0 ? 'block' : 'none';
+        controlsCard.style.display = cards.length > 0 ? 'block' : 'none';
 
-        renderResearchBoxes(subtopics, step2.research_results || []);
+        renderDraftBoxes(cards, step2.drafts || []);
 
         // Update run status if running
         const statusEl = document.getElementById('step2-run-status');
         if (step2.status === 'running') {
-            statusEl.innerHTML = '<span class="spinner"></span> Researching...';
+            statusEl.innerHTML = '<span class="spinner"></span> Drafting...';
         }
 
         // Poll if any box is running
-        const results = step2.research_results || [];
-        if (results.some(r => r.status === 'running')) {
+        const drafts = step2.drafts || [];
+        if (drafts.some(d => d.status === 'running')) {
             startPolling();
         }
     } catch (e) {
@@ -84,83 +88,72 @@ async function loadStep2Data() {
     }
 }
 
-function renderResearchBoxes(subtopics, researchResults) {
+function getTypeBadge(type) {
+    const colors = {
+        'beginning': { bg: '#2d1f6e', text: '#b4a0ff', label: 'Beginning' },
+        'middle': { bg: '#1e3a5f', text: '#7ab7ef', label: 'Middle' },
+        'end': { bg: '#1e5f3a', text: '#7aef9f', label: 'End' },
+    };
+    const c = colors[type] || colors['middle'];
+    return `<span style="display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; background:${c.bg}; color:${c.text}; flex-shrink:0;">${c.label}</span>`;
+}
+
+function renderDraftBoxes(cards, drafts) {
     const container = document.getElementById('step2-results-container');
 
-    if (subtopics.length === 0) {
+    if (cards.length === 0) {
         container.innerHTML = `
             <div class="card">
                 <p style="color:var(--text-secondary)">
-                    No subtopics to research yet. Go to Step 1 to generate your article outline first.
+                    No outline cards to draft yet. Go to Step 1 to generate your article outline first.
                 </p>
             </div>
         `;
         return;
     }
 
-    // Build a lookup by topic_id
-    const resultLookup = {};
-    for (const r of researchResults) {
-        resultLookup[r.topic_id] = r;
+    // Build a lookup by card_id
+    const draftLookup = {};
+    for (const d of drafts) {
+        draftLookup[d.card_id] = d;
     }
 
-    container.innerHTML = subtopics.map(st => {
-        const result = resultLookup[st.id] || { status: 'idle', research_summary: '', sources: [], error: null };
-        const status = result.status || 'idle';
-        const statusClass = status;
+    container.innerHTML = cards.map(card => {
+        const draft = draftLookup[card.id] || { status: 'idle', draft: '', error: null };
+        const status = draft.status || 'idle';
         const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-
-        // Build the compiled user message that gets sent to Gemini (per-box, always visible)
-        const compiledUserMessage = [
-            `ARGUMENT TO PROVE: ${st.angle || ''}`,
-            `WHAT TO DIG FOR: ${st.research_info || ''}`,
-            `SEARCH: ${st.search_query || ''}`,
-            `TITLE: ${st.title || ''}`,
-            '',
-            _userMessageSuffix
-        ].join('\n');
 
         let bodyHtml = '';
         let actionBtn = '';
 
         if (status === 'running') {
-            bodyHtml = '<div style="padding:12px 0;"><span class="spinner"></span> Researching with Google Search...</div>';
+            bodyHtml = '<div style="padding:12px 0;"><span class="spinner"></span> Writing draft with extended thinking...</div>';
             actionBtn = '';
         } else if (status === 'completed') {
-            const summary = result.research_summary || '';
-            const sources = result.sources || [];
+            const draftText = draft.draft || '';
             bodyHtml = `
                 <div style="margin-bottom:12px;">
-                    <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Research Summary</span>
-                    <div style="margin-top:4px; font-size:13px; line-height:1.6; color:var(--text); white-space:pre-wrap;">${escapeHtml(summary)}</div>
+                    <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Draft</span>
+                    <div style="margin-top:4px; font-size:13px; line-height:1.7; color:var(--text); white-space:pre-wrap;">${escapeHtml(draftText)}</div>
                 </div>
-                ${sources.length > 0 ? `
-                <div style="margin-bottom:12px;">
-                    <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Sources (${sources.length})</span>
-                    <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:6px;">
-                        ${sources.map((s, i) => `
-                            <a href="${escapeHtml(s.url || '#')}" target="_blank" rel="noopener"
-                               style="display:inline-block; padding:4px 10px; background:var(--bg); border:1px solid var(--border); border-radius:4px; font-size:12px; color:var(--accent); text-decoration:none;"
-                               title="${escapeHtml(s.url || '')}">
-                               [${i + 1}] ${escapeHtml(s.title || s.url || 'Source')}
-                            </a>
-                        `).join('')}
-                    </div>
-                </div>
-                ` : ''}
             `;
-            actionBtn = `<button class="secondary step2-run-btn" data-topic-id="${st.id}" style="font-size:12px;">🔄 Re-run</button>`;
+            actionBtn = `<button class="secondary step2-draft-btn" data-card-id="${card.id}" style="font-size:12px;">🔄 Re-draft</button>`;
         } else if (status === 'failed') {
             bodyHtml = `
                 <div class="error-box" style="margin:8px 0;">
-                    ${escapeHtml(result.error || 'Unknown error')}
+                    ${escapeHtml(draft.error || 'Unknown error')}
                 </div>
             `;
-            actionBtn = `<button class="step2-run-btn" data-topic-id="${st.id}" style="font-size:12px;">🔁 Retry</button>`;
+            actionBtn = `<button class="step2-draft-btn" data-card-id="${card.id}" style="font-size:12px;">🔁 Retry</button>`;
         } else {
             // idle
-            bodyHtml = '';
-            actionBtn = `<button class="step2-run-btn" data-topic-id="${st.id}" style="font-size:12px;">🔍 Research This</button>`;
+            bodyHtml = `
+                <div style="margin-bottom:8px;">
+                    <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">Angle</span>
+                    <p style="margin:2px 0 0 0; font-size:12px; line-height:1.5; color:var(--text-secondary);">${escapeHtml(card.angle || '—')}</p>
+                </div>
+            `;
+            actionBtn = `<button class="step2-draft-btn" data-card-id="${card.id}" style="font-size:12px;">✍️ Draft This</button>`;
         }
 
         const borderColor = status === 'completed' ? 'var(--success)' :
@@ -168,44 +161,40 @@ function renderResearchBoxes(subtopics, researchResults) {
                            status === 'running' ? 'var(--accent)' : 'var(--border)';
 
         return `
-            <div class="card research-card" data-topic-id="${st.id}" style="border-left:3px solid ${borderColor};">
+            <div class="card draft-card" data-card-id="${card.id}" style="border-left:3px solid ${borderColor};">
                 <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
-                    <div style="display:flex; align-items:baseline; gap:10px;">
-                        <span style="font-weight:700; color:var(--accent); font-size:14px; flex-shrink:0;">#${st.id}</span>
-                        <span style="font-weight:600; font-size:15px; line-height:1.4;">${escapeHtml(st.title || '(untitled)')}</span>
+                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                        ${getTypeBadge(card.type)}
+                        <span style="font-weight:600; font-size:15px; line-height:1.4;">${escapeHtml(card.title || '(untitled)')}</span>
                     </div>
-                    <span class="status ${statusClass}">${statusLabel}</span>
-                </div>
-                <div style="margin-bottom:12px;">
-                    <span style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px;">User Message (sent to Gemini)</span>
-                    <pre style="margin:4px 0 0 0; font-size:11px; font-family:var(--mono); line-height:1.5; color:var(--text); background:var(--bg); padding:8px 10px; border-radius:4px; white-space:pre-wrap; overflow-x:auto;">${escapeHtml(compiledUserMessage)}</pre>
+                    <span class="status ${status}">${statusLabel}</span>
                 </div>
                 ${bodyHtml}
                 <div style="margin-top:${bodyHtml ? '12' : '0'}px; display:flex; align-items:center; gap:8px;">
                     ${actionBtn}
-                    <span class="step2-box-status" data-topic-id="${st.id}"></span>
+                    <span class="step2-box-status" data-card-id="${card.id}"></span>
                 </div>
             </div>
         `;
     }).join('');
 
     // Wire up per-box buttons
-    container.querySelectorAll('.step2-run-btn').forEach(btn => {
+    container.querySelectorAll('.step2-draft-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const topicId = parseInt(btn.dataset.topicId);
-            runSingleTopic(topicId);
+            const cardId = parseInt(btn.dataset.cardId);
+            draftSingleCard(cardId);
         });
     });
 }
 
-async function runSingleTopic(topicId) {
-    const card = document.querySelector(`.research-card[data-topic-id="${topicId}"]`);
-    const btn = card.querySelector('.step2-run-btn');
+async function draftSingleCard(cardId) {
+    const card = document.querySelector(`.draft-card[data-card-id="${cardId}"]`);
+    const btn = card.querySelector('.step2-draft-btn');
     const statusEl = card.querySelector('.step2-box-status');
 
     if (btn) {
         btn.disabled = true;
-        btn.textContent = 'Running...';
+        btn.textContent = 'Drafting...';
     }
     if (statusEl) {
         statusEl.innerHTML = '<span class="spinner"></span>';
@@ -214,19 +203,17 @@ async function runSingleTopic(topicId) {
     hideError();
 
     try {
-        const result = await API.post(`/api/step/2/run-topic/${topicId}`, {});
+        const result = await API.post(`/api/step/2/run-card/${cardId}`, {});
 
         if (result.ok) {
             if (statusEl) {
                 statusEl.innerHTML = '<span style="color:var(--success)">✓ Done</span>';
             }
-            // Reload data to refresh display
             await loadStep2Data();
         } else {
             if (statusEl) {
                 statusEl.innerHTML = `<span style="color:var(--error)">✗ ${escapeHtml(result.error || 'Failed')}</span>`;
             }
-            // Reload to show the per-box error
             await loadStep2Data();
         }
     } catch (e) {
@@ -237,20 +224,20 @@ async function runSingleTopic(topicId) {
     }
 }
 
-async function runAllResearch() {
+async function runAllDrafts() {
     const btn = document.getElementById('step2-run-all-btn');
     const status = document.getElementById('step2-run-status');
 
     btn.disabled = true;
-    btn.textContent = 'Running...';
-    status.innerHTML = '<span class="spinner"></span> Researching all subtopics sequentially...';
+    btn.textContent = 'Drafting...';
+    status.innerHTML = '<span class="spinner"></span> Drafting all cards sequentially...';
     hideError();
 
     try {
         const result = await API.post('/api/step/2/run', {});
 
         if (result.ok) {
-            status.innerHTML = '<span style="color:var(--success)">✓ All research completed</span>';
+            status.innerHTML = '<span style="color:var(--success)">✓ All drafts completed</span>';
         } else {
             status.innerHTML = `<span style="color:var(--error)">✗ ${escapeHtml(result.error || 'Unknown error')}</span>`;
             showError(result.error);
@@ -262,7 +249,18 @@ async function runAllResearch() {
         await loadStep2Data();
     } finally {
         btn.disabled = false;
-        btn.textContent = '🔍 Research All';
+        btn.textContent = '✍️ Draft All';
+    }
+}
+
+function updateModelSpecificParams() {
+    const isHaiku = _currentModel.startsWith('claude-haiku');
+    document.getElementById('step2-thinking-budget-group').style.display = isHaiku ? 'block' : 'none';
+    document.getElementById('step2-effort-group').style.display = isHaiku ? 'none' : 'block';
+    // Haiku requires temp = 1.0 for thinking
+    if (isHaiku) {
+        document.getElementById('step2-temperature').value = 1.0;
+        document.getElementById('temp-value').textContent = '1.0';
     }
 }
 
@@ -272,6 +270,8 @@ async function autoSaveParams() {
             model: _currentModel,
             temperature: parseFloat(document.getElementById('step2-temperature').value),
             max_tokens: parseInt(document.getElementById('step2-max-tokens').value),
+            thinking_budget: parseInt(document.getElementById('step2-thinking-budget').value),
+            effort: document.getElementById('step2-effort').value,
             system_prompt: _currentSystemPrompt,
         });
     } catch (e) {
@@ -293,6 +293,8 @@ async function saveParams() {
             model: _currentModel,
             temperature: parseFloat(document.getElementById('step2-temperature').value),
             max_tokens: parseInt(document.getElementById('step2-max-tokens').value),
+            thinking_budget: parseInt(document.getElementById('step2-thinking-budget').value),
+            effort: document.getElementById('step2-effort').value,
             system_prompt: _currentSystemPrompt,
         });
         status.innerHTML = '<span style="color:var(--success)">✓ Saved</span>';
@@ -314,24 +316,23 @@ function startPolling() {
     _pollTimer = setInterval(async () => {
         try {
             const step2 = await API.get('/api/step/2/data');
-            const results = step2.research_results || [];
-            const stillRunning = results.some(r => r.status === 'running');
+            const drafts = step2.drafts || [];
+            const stillRunning = drafts.some(d => d.status === 'running');
 
-            // Reload to refresh the UI
             const step1 = await API.get('/api/step/1/data');
-            renderResearchBoxes(step1.subtopics || [], results);
+            renderDraftBoxes(step1.cards || [], drafts);
 
             const statusEl = document.getElementById('step2-run-status');
             if (stillRunning) {
-                statusEl.innerHTML = '<span class="spinner"></span> Researching...';
+                statusEl.innerHTML = '<span class="spinner"></span> Drafting...';
             } else if (step2.status === 'completed') {
-                statusEl.innerHTML = '<span style="color:var(--success)">✓ All research completed</span>';
+                statusEl.innerHTML = '<span style="color:var(--success)">✓ All drafts completed</span>';
                 stopPolling();
             } else if (step2.status === 'partial') {
-                statusEl.innerHTML = '<span style="color:var(--warning)">⚠ Partially complete — some topics still need research</span>';
+                statusEl.innerHTML = '<span style="color:var(--warning)">⚠ Partially complete — some cards still need drafting</span>';
                 stopPolling();
             } else if (step2.status === 'failed') {
-                statusEl.innerHTML = '<span style="color:var(--error)">✗ Research failed</span>';
+                statusEl.innerHTML = '<span style="color:var(--error)">✗ Drafting failed</span>';
                 stopPolling();
             }
         } catch (e) {
