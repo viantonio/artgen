@@ -26,7 +26,7 @@ def load_settings() -> dict:
     if SETTINGS_FILE.exists():
         with open(SETTINGS_FILE, "r") as f:
             return json.load(f)
-    return {"anthropic_key": "", "gemini_key": ""}
+    return {"anthropic_key": "", "gemini_key": "", "openai_key": ""}
 
 
 def save_settings(settings: dict) -> None:
@@ -52,7 +52,7 @@ def _recover_stuck_steps() -> None:
     for entry in DATA_DIR.iterdir():
         if not entry.is_dir():
             continue
-        for step_file_name in ["step1.json", "step2.json", "step3.json", "step4.json", "step5.json"]:
+        for step_file_name in ["step1.json", "step2.json", "step3.json", "step4.json", "step5.json", "step6.json"]:
             step_file = entry / step_file_name
             if not step_file.exists():
                 continue
@@ -137,6 +137,7 @@ from pydantic import BaseModel
 class SettingsUpdate(BaseModel):
     anthropic_key: str = ""
     gemini_key: str = ""
+    openai_key: str = ""
 
 
 @app.get("/api/settings")
@@ -146,6 +147,7 @@ async def get_settings():
     return {
         "anthropic_key": mask_key(settings.get("anthropic_key", "")),
         "gemini_key": mask_key(settings.get("gemini_key", "")),
+        "openai_key": mask_key(settings.get("openai_key", "")),
     }
 
 
@@ -157,6 +159,8 @@ async def update_settings(body: SettingsUpdate):
         settings["anthropic_key"] = body.anthropic_key.strip()
     if body.gemini_key and "*" * (len(body.gemini_key) - 8) not in body.gemini_key:
         settings["gemini_key"] = body.gemini_key.strip()
+    if body.openai_key and "*" * (len(body.openai_key) - 8) not in body.openai_key:
+        settings["openai_key"] = body.openai_key.strip()
     save_settings(settings)
     return {"ok": True}
 
@@ -315,7 +319,10 @@ def init_step_files(proj_dir: Path) -> None:
         "styled_article": "", "status": "idle", "last_run": None, "error": None,
     }
     step5_default = {
-        "images": [], "final_article": "", "status": "idle", "last_run": None, "error": None,
+        "image_count": 3, "image_cards": [], "final_article": "", "status": "idle", "last_run": None, "error": None,
+    }
+    step6_default = {
+        "image_cards": [], "status": "idle", "last_run": None, "error": None,
     }
 
     defaults = {
@@ -324,6 +331,7 @@ def init_step_files(proj_dir: Path) -> None:
         "step3.json": step3_default,
         "step4.json": step4_default,
         "step5.json": step5_default,
+        "step6.json": step6_default,
     }
 
     for filename, default_data in defaults.items():
@@ -379,7 +387,7 @@ def load_project(proj_dir: Path) -> dict:
             project = json.load(f)
 
     steps = {}
-    for i in range(1, 6):
+    for i in range(1, 7):
         step_file = proj_dir / f"step{i}.json"
         if step_file.exists():
             with open(step_file) as f:
@@ -434,7 +442,7 @@ async def get_project():
         "created": proj.get("created"),
         "current_step": proj.get("current_step", 1),
         "exists": True,
-        "steps": {str(i): {"status": proj["steps"][i].get("status", "idle")} for i in range(1, 6)},
+        "steps": {str(i): {"status": proj["steps"][i].get("status", "idle")} for i in range(1, 7)},
     }
     return result
 
@@ -495,7 +503,7 @@ async def load_project_by_name(dir_name: str):
         "name": _current_project.get("name"),
         "dir_name": dir_name,
         "created": _current_project.get("created"),
-        "steps": {str(i): {"status": _current_project["steps"][i].get("status", "idle")} for i in range(1, 6)},
+        "steps": {str(i): {"status": _current_project["steps"][i].get("status", "idle")} for i in range(1, 7)},
     }
 
 
@@ -523,7 +531,7 @@ async def load_last_project():
         "name": _current_project.get("name"),
         "dir_name": proj_dir.name,
         "created": _current_project.get("created"),
-        "steps": {str(i): {"status": _current_project["steps"][i].get("status", "idle")} for i in range(1, 6)},
+        "steps": {str(i): {"status": _current_project["steps"][i].get("status", "idle")} for i in range(1, 7)},
     }
 
 
@@ -1792,6 +1800,1050 @@ async def run_step3():
 
     save_step3_data(step3_data)
     return {"ok": False, "error": step3_data["error"]}
+
+
+# --- Step 4: Style Rewrite ---
+
+STEP4_DEFAULT_PARAMS = {
+    "model": "claude-haiku-4-5",
+    "temperature": 1.0,
+    "max_tokens": 8192,
+    "thinking_budget": 1600,
+    "effort": "high",
+    "system_prompt": (
+        "You are a Cracked.com writer circa 2012. Not a journalist. Not an educator. A comedian "
+        "who happens to be armed with facts and is going to make you laugh so hard you don't "
+        "notice you're learning something until it's already lodged in your brain.\n\n"
+        "YOUR JOB:\n"
+        "Make the reader laugh first, think second. The information matters — but it only lands "
+        "BECAUSE the comedy softens them up. You're not writing a textbook with jokes sprinkled "
+        "on top. You're writing a comedy piece where the punchlines happen to be true. The reader "
+        "should be too busy laughing to realize they're being persuaded.\n\n"
+        "Rewrite the draft article completely. Kill its structure — no section breaks, no "
+        "\"firstly/secondly/in conclusion\" scaffolding, no polite transitions. This is a from-scratch "
+        "rewrite using the draft as raw material.\n\n"
+        "CRITICAL — LENGTH: The draft is too long. Your output should be SIGNIFICANTLY shorter — "
+        "roughly HALF the original word count or less. Be ruthless:\n"
+        "- Make each point ONCE. If you've already said it, don't rephrase it. Move on.\n"
+        "- Not every fact survives. Keep the wildest, funniest, most convincing ones. Kill anything "
+        "redundant, minor, or boring.\n"
+        "- If the draft spends three paragraphs on the same idea, pick the best angle and kill the "
+        "other two. One hilarious paragraph beats three informative ones.\n\n"
+        "THE VOICE:\n"
+        "- Funny first. Your PRIMARY job is to be entertaining. Every paragraph should either make "
+        "them laugh, make them go \"wait WHAT,\" or ideally both. The facts are ammunition for "
+        "jokes — not the other way around.\n"
+        "- RIDICULOUS. Old-school Cracked didn't do subtle. Take ideas to their most absurd "
+        "logical conclusion. Compare things that shouldn't be compared. Use hyperbole that's "
+        "so specific it becomes funny again. If you're not at least a little unhinged, you're "
+        "not trying hard enough.\n"
+        "- Relentless. Don't give the reader a chance to get bored. Every paragraph sets up the "
+        "next one. By the time they finish one outrageous claim, you're already hitting them "
+        "with the evidence that proves it, which sets up an even MORE outrageous implication. "
+        "Shake them down with facts and jokes until they have no choice but to agree with you.\n"
+        "- Cynical, irreverent, but never mean-spirited. You're on the reader's side. You're both "
+        "looking at how absurd this all is together. The tone is \"can you BELIEVE this?\" not "
+        "\"you're an idiot for not knowing.\"\n"
+        "- Conversational. Read like someone talking too fast because they're genuinely excited "
+        "about how insane this all is. Short paragraphs. Varied rhythm. If a sentence sounds like "
+        "it came from a textbook, a press release, or a LinkedIn post, kill it.\n\n"
+        "WHAT TO AVOID:\n"
+        "- Don't preserve the original structure. Synthesize. Blend. Make it one piece.\n"
+        "- Don't overuse any single joke structure. If you catch yourself doing \"It's not X, "
+        "it's Y\" twice, the second one dies.\n"
+        "- Don't be a template. If the article reads like you filled in blanks on a Cracked Mad "
+        "Lib, scrap it and write like a human.\n"
+        "- Don't play it safe. The draft is polite. You are not. Be funnier, louder, and more "
+        "ridiculous than the draft dares to be.\n\n"
+        "FORMAT:\n"
+        "Output in Markdown. ## for section heads, **bold** for punch and emphasis, *italics* "
+        "for asides, numbered/bulleted lists where they serve the flow, --- for major breaks "
+        "if needed. Clean and render-ready.\n\n"
+        "Output ONLY the article. No preamble, no sign-off, no meta. Just the piece."
+    ),
+}
+
+STEP4_MODELS = [
+    {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5 (Fastest)"},
+    {"id": "claude-sonnet-5", "name": "Claude Sonnet 5 (Balanced)"},
+    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+    {"id": "claude-opus-4-8", "name": "Claude Opus 4.8 (Most Capable)"},
+    {"id": "claude-fable-5", "name": "Claude Fable 5 (Best)"},
+]
+
+
+def get_step4_params() -> dict:
+    """Load Step 4 params from disk or return defaults."""
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step4_params.json"
+        if params_file.exists():
+            with open(params_file) as f:
+                return json.load(f)
+    return dict(STEP4_DEFAULT_PARAMS)
+
+
+def save_step4_params(params: dict) -> None:
+    """Persist Step 4 params to disk."""
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step4_params.json"
+        with open(params_file, "w") as f:
+            json.dump(params, f, indent=2)
+
+
+def get_step4_data() -> dict:
+    """Load Step 4 data from disk."""
+    global _current_project_path
+    if _current_project_path:
+        step_file = _current_project_path / "step4.json"
+        if step_file.exists():
+            with open(step_file) as f:
+                return json.load(f)
+    return {
+        "styled_article": "", "status": "idle", "last_run": None, "error": None,
+    }
+
+
+def save_step4_data(data: dict) -> bool:
+    """Persist Step 4 data to disk. Returns False if no project is loaded."""
+    global _current_project_path
+    if not _current_project_path:
+        return False
+    step_file = _current_project_path / "step4.json"
+    with open(step_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return True
+
+
+class Step4DataUpdate(BaseModel):
+    styled_article: str = ""
+    status: str = "idle"
+    error: str | None = None
+
+
+class Step4ParamsUpdate(BaseModel):
+    model: str = "claude-haiku-4-5"
+    temperature: float = 1.0
+    max_tokens: int = 8192
+    thinking_budget: int = 1600
+    effort: str = "high"
+    system_prompt: str = ""
+
+
+def _build_step4_user_message(step3_draft_article: str) -> str:
+    """Build the user message for Step 4 from a Step 3 draft article."""
+    return (
+        "DRAFT TO REWRITE:\n\n"
+        f"{step3_draft_article}\n\n"
+        "---\n\n"
+        "Rewrite this from scratch. The draft above is TOO LONG and TOO POLITE — your output "
+        "should be roughly HALF its length and TEN TIMES funnier. Kill the structure. Kill the "
+        "transitions. Make it one flowing, ridiculous, laugh-out-loud piece in the voice "
+        "described above.\n\n"
+        "Be ruthless: keep only the strongest facts, make each point once, and make sure every "
+        "paragraph either gets a laugh or sets one up. The draft is raw material. You're here "
+        "to turn it into entertainment that happens to be true.\n\n"
+        "Output the article in Markdown. Nothing else."
+    )
+
+
+@app.get("/api/step/4/data")
+async def get_step4():
+    """Get Step 4 stored data."""
+    return get_step4_data()
+
+
+@app.put("/api/step/4/data")
+async def update_step4(body: Step4DataUpdate):
+    """Update Step 4 data (manual edit)."""
+    data = body.model_dump()
+    if not save_step4_data(data):
+        return {"ok": False, "error": "No project loaded. Go to Project and create or load one first."}
+    log_entry("INFO", 4, f"Step 4 data updated. Article length: {len(data.get('styled_article', ''))}")
+    return {"ok": True}
+
+
+@app.get("/api/step/4/params")
+async def get_step4_params_route():
+    """Get Step 4 parameters."""
+    params = get_step4_params()
+    params["available_models"] = STEP4_MODELS
+    return params
+
+
+@app.put("/api/step/4/params")
+async def update_step4_params(body: Step4ParamsUpdate):
+    """Update Step 4 parameters."""
+    params = body.model_dump()
+    save_step4_params(params)
+    log_entry("INFO", 4, f"Step 4 params updated. Model: {params['model']}, Temp: {params['temperature']}, Thinking budget: {params.get('thinking_budget', 0)}")
+    return {"ok": True}
+
+
+@app.get("/api/step/4/user-message")
+async def get_step4_user_message():
+    """Get the user message preview for Step 4 — what will be sent to the model."""
+    step3_data = get_step3_data()
+    draft_article = step3_data.get("draft_article", "")
+    if not draft_article.strip():
+        return {"user_message": "", "warning": "Step 3 has no article yet. Run Step 3 first."}
+    user_message = _build_step4_user_message(draft_article)
+    return {"user_message": user_message}
+
+
+@app.post("/api/step/4/run")
+async def run_step4():
+    """Execute Step 4: rewrite the Step 3 article in Cracked.com style."""
+    import httpx
+    import asyncio
+
+    step3_data = get_step3_data()
+    step4_data = get_step4_data()
+    params = get_step4_params()
+    settings = load_settings()
+
+    if not _current_project_path:
+        return {"ok": False, "error": "No project loaded."}
+
+    # Validate Step 3 is done
+    draft_article = step3_data.get("draft_article", "")
+    if step3_data.get("status") != "completed" or not draft_article.strip():
+        return {"ok": False, "error": "Step 3 is not complete. Run Step 3 (Article Synthesis) first."}
+
+    api_key = settings.get("anthropic_key", "").strip()
+    if not api_key:
+        step4_data["status"] = "failed"
+        step4_data["error"] = "No Anthropic API key configured. Go to Settings to add one."
+        save_step4_data(step4_data)
+        return {"ok": False, "error": step4_data["error"]}
+
+    step4_data["status"] = "running"
+    step4_data["error"] = None
+    save_step4_data(step4_data)
+
+    model = params.get("model", "claude-haiku-4-5")
+    temperature = params.get("temperature", 1.0)
+    max_tokens = params.get("max_tokens", 8192)
+    thinking_budget = params.get("thinking_budget", 1600)
+    effort = params.get("effort", "high")
+    system_prompt = params.get("system_prompt", STEP4_DEFAULT_PARAMS["system_prompt"])
+
+    user_message = _build_step4_user_message(draft_article)
+
+    log_entry("INFO", 4, (
+        f"Rewriting article in Cracked.com style. Step 3 article: {len(draft_article)} chars.\n"
+        f"--- SYSTEM ---\n{system_prompt[:300]}...\n"
+        f"--- USER ---\n{user_message[:500]}..."
+    ))
+
+    # Build model-appropriate thinking config
+    is_haiku = model.startswith("claude-haiku")
+    if is_haiku:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": 1.0,
+            "system": system_prompt,
+            "thinking": {"type": "enabled", "budget_tokens": thinking_budget},
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        log_entry("INFO", 4, f"Style rewrite with {model} (thinking budget: {thinking_budget})")
+    else:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_prompt,
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": effort},
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        log_entry("INFO", 4, f"Style rewrite with {model} (adaptive thinking, effort: {effort})")
+
+    # Retry loop — 2 attempts
+    success = False
+    for attempt in range(1, 3):
+        try:
+            async with httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json=request_body,
+                )
+
+            if resp.status_code == 200:
+                result = resp.json()
+                content_blocks = result.get("content", [])
+                response_text = ""
+                for block in content_blocks:
+                    if block.get("type") == "text":
+                        response_text += block.get("text", "")
+
+                if response_text.strip():
+                    step4_data["styled_article"] = response_text.strip()
+                    step4_data["status"] = "completed"
+                    step4_data["last_run"] = dt.datetime.now().isoformat()
+                    step4_data["error"] = None
+                    save_step4_data(step4_data)
+                    usage = result.get("usage", {})
+                    log_entry("INFO", 4, (
+                        f"Step 4 completed — article {len(response_text)} chars, "
+                        f"input_tokens={usage.get('input_tokens', 'N/A')}, "
+                        f"output_tokens={usage.get('output_tokens', 'N/A')}"
+                    ))
+                    return {"ok": True, "styled_article": step4_data["styled_article"]}
+                else:
+                    log_entry("ERROR", 4, f"Step 4 — empty response (attempt {attempt})")
+                    step4_data["status"] = "failed"
+                    step4_data["error"] = f"Model returned empty response (attempt {attempt})"
+            else:
+                error_detail = "Unknown error"
+                try:
+                    err_data = resp.json()
+                    err = err_data.get("error", {})
+                    error_detail = err.get("message", resp.text[:500])
+                except Exception:
+                    error_detail = resp.text[:500]
+
+                log_entry("ERROR", 4, f"Anthropic API error ({resp.status_code}) attempt {attempt}: {error_detail}")
+                step4_data["status"] = "failed"
+                step4_data["error"] = f"API error ({resp.status_code}) attempt {attempt}: {error_detail}"
+
+        except httpx.TimeoutException:
+            log_entry("ERROR", 4, f"Anthropic timeout on attempt {attempt}")
+            step4_data["status"] = "failed"
+            step4_data["error"] = f"Request timed out after 180s (attempt {attempt})"
+        except Exception as e:
+            log_entry("ERROR", 4, f"Anthropic unexpected error attempt {attempt}: {str(e)}")
+            step4_data["status"] = "failed"
+            step4_data["error"] = f"Unexpected error (attempt {attempt}): {str(e)}"
+
+        # Retry with delay if not last attempt
+        if attempt == 1:
+            log_entry("WARN", 4, "Step 4 failed attempt 1. Retrying in 3s...")
+            await asyncio.sleep(3)
+
+    save_step4_data(step4_data)
+    return {"ok": False, "error": step4_data["error"]}
+
+
+# ============================================================
+# Step 5 — Image Planning
+# ============================================================
+
+STEP5_DEFAULT_PARAMS = {
+    "model": "claude-haiku-4-5",
+    "temperature": 1.0,
+    "max_tokens": 8192,
+    "thinking_budget": 1600,
+    "effort": "high",
+    "system_prompt": (
+        "You are an image planner for a comedy article. Your job: read the article, find the "
+        "best spots for images, and plan them out.\n\n"
+        "THE ARTICLE:\n"
+        "The user will give you a finished article written in the voice of 2010s Cracked.com — "
+        "funny, cynical, irreverent, ridiculous. Your images need to MATCH that energy. No "
+        "stock-photo corporate nonsense. No generic \"person looking at computer\" garbage. "
+        "Every image should feel like it belongs in a Cracked article.\n\n"
+        "WHAT TO DO:\n"
+        "1. Read the article carefully. Find exactly the specified number of natural break points where an image would "
+        "land with maximum impact — punchlines, absurd comparisons, \"wait WHAT\" moments, "
+        "or places where a visual would make the joke hit twice as hard.\n"
+        "2. For each spot, identify the ANCHOR TEXT — the EXACT sentence or phrase from the "
+        "article (copied verbatim, character-for-character) that marks where the image goes. "
+        "The image and caption will be inserted AFTER this text. The anchor MUST be unique "
+        "enough to match only one place in the article.\n"
+        "3. Write a CAPTION in the article's voice. The caption should be "
+        "funny on its own — it's part of the entertainment, not a dry label. Think of it as "
+        "a mini-joke that adds another layer to the article.\n"
+        "4. Write an IMAGE PROMPT that's detailed and specific enough for an AI image generator "
+        "(like DALL-E or Midjourney) to produce something great. Include:\n"
+        "   - Subject and composition (what's in the frame, how it's arranged)\n"
+        "   - Style/aesthetic (photorealistic, illustration, retro, cinematic, etc. — pick "
+        "what serves the joke best)\n"
+        "   - Mood and tone (absurd, dramatic, deadpan, chaotic — match the caption)\n"
+        "   - Color palette if relevant\n"
+        "   - Any specific details that make the image work for the joke\n"
+        "5. Include a brief RATIONALE — why THIS image at THIS spot. One sentence is fine.\n\n"
+        "IMAGE PLACEMENT STRATEGY:\n"
+        "- Don't cluster images too close together. Spread them across the article.\n"
+        "- The first image should hook readers early (within the first few paragraphs).\n"
+        "- Save at least one banger for the closing section — leave them laughing.\n"
+        "- If the article makes an insane comparison or absurd claim, VISUALIZE IT. Those "
+        "are your best image opportunities.\n"
+        "- Don't illustrate the obvious. If the text already paints a perfect mental picture, "
+        "move on. Find the spots where a visual ADDS something.\n\n"
+        "CRITICAL — ANCHOR TEXT RULES:\n"
+        "- Copy the anchor sentence from the article EXACTLY — same punctuation, same "
+        "capitalization, same spacing. It must be findable with Ctrl+F.\n"
+        "- Pick a phrase long enough to be unique (at least 60 characters if possible). "
+        "If the article says \"and that's why dolphins are actually jerks,\" your anchor "
+        "is \"and that's why dolphins are actually jerks\" — verbatim.\n"
+        "- Don't paraphrase. Don't summarize. Don't describe the section. Copy the text.\n"
+        "- If you can't find a unique anchor, pick the longest distinctive substring "
+        "that only appears once in the article.\n\n"
+        "OUTPUT FORMAT:\n"
+        "Output a single JSON object with an \"image_cards\" array. Each entry has:\n"
+        "- \"id\": 1-based index\n"
+        "- \"anchor_text\": EXACT verbatim sentence/phrase from the article — image goes AFTER this\n"
+        "- \"caption\": The image caption (funny, in the article's voice)\n"
+        "- \"image_prompt\": Detailed AI image generation prompt\n"
+        "- \"rationale\": Why this image here (one sentence)\n\n"
+        "Output ONLY valid JSON. No preamble, no markdown fences, no sign-off. Just the JSON object."
+    ),
+}
+
+STEP5_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "image_cards": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "1-based index of this image card"},
+                    "anchor_text": {"type": "string", "description": "EXACT sentence or phrase from the article to anchor placement — copy it verbatim so it can be found with a text search. The image and caption will be inserted AFTER this text."},
+                    "caption": {"type": "string", "description": "Witty, Cracked-style image caption — the final text displayed under the image"},
+                    "image_prompt": {"type": "string", "description": "Detailed AI image generation prompt with style, composition, mood"},
+                    "rationale": {"type": "string", "description": "Why this image belongs at this spot"},
+                },
+                "required": ["id", "anchor_text", "caption", "image_prompt"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["image_cards"],
+    "additionalProperties": False,
+}
+
+STEP5_MODELS = [
+    {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5 (Fastest)"},
+    {"id": "claude-sonnet-5", "name": "Claude Sonnet 5 (Balanced)"},
+    {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+    {"id": "claude-opus-4-8", "name": "Claude Opus 4.8 (Most Capable)"},
+    {"id": "claude-fable-5", "name": "Claude Fable 5 (Best)"},
+]
+
+
+def get_step5_params() -> dict:
+    """Load Step 5 params from disk or return defaults."""
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step5_params.json"
+        if params_file.exists():
+            with open(params_file) as f:
+                return json.load(f)
+    return dict(STEP5_DEFAULT_PARAMS)
+
+
+def save_step5_params(params: dict) -> None:
+    """Persist Step 5 params to disk."""
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step5_params.json"
+        with open(params_file, "w") as f:
+            json.dump(params, f, indent=2)
+
+
+def get_step5_data() -> dict:
+    """Load Step 5 data from disk."""
+    global _current_project_path
+    if _current_project_path:
+        step_file = _current_project_path / "step5.json"
+        if step_file.exists():
+            with open(step_file) as f:
+                return json.load(f)
+    return {
+        "image_count": 3, "image_cards": [], "final_article": "", "status": "idle", "last_run": None, "error": None,
+    }
+
+
+def save_step5_data(data: dict) -> bool:
+    """Persist Step 5 data to disk. Returns False if no project is loaded."""
+    global _current_project_path
+    if not _current_project_path:
+        return False
+    step_file = _current_project_path / "step5.json"
+    with open(step_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return True
+
+
+class Step5DataUpdate(BaseModel):
+    image_count: int = 3
+    image_cards: list = []
+    status: str = "idle"
+    error: str | None = None
+
+
+class Step5ParamsUpdate(BaseModel):
+    model: str = "claude-haiku-4-5"
+    temperature: float = 1.0
+    max_tokens: int = 8192
+    thinking_budget: int = 1600
+    effort: str = "high"
+    system_prompt: str = ""
+
+
+def _build_step5_user_message(step4_styled_article: str, image_count: int = 3) -> str:
+    """Build the user message for Step 5 from a Step 4 styled article."""
+    return (
+        "STYLED ARTICLE:\n\n"
+        f"{step4_styled_article}\n\n"
+        "---\n\n"
+        f"Plan exactly {image_count} images for this article.\n\n"
+        "For each image spot:\n"
+        "1. Find a natural break point. Copy the EXACT sentence or phrase to use as anchor_text "
+        "(verbatim from the article — same punctuation, capitalization, spacing — so it can be "
+        "found with a text search). Pick a phrase at least 60 chars long if possible. The image "
+        "and caption will be inserted AFTER this anchor.\n"
+        "2. Write a caption in the same voice as the article — funny, punchy, irreverent.\n"
+        "3. Write a detailed AI image generation prompt — include style, composition, mood, "
+        "subject, and any specific visual details that sell the joke.\n\n"
+        "CRITICAL — ANCHOR TEXT RULES:\n"
+        "- Copy the anchor sentence EXACTLY from the article — every character, every space, "
+        "every punctuation mark. Use Ctrl+C on the article text above, then Ctrl+V into your "
+        "anchor_text field. Do NOT retype it.\n"
+        "- PRESERVE ALL MARKDOWN FORMATTING. If the article says \"*illusion*\" your anchor "
+        "must say \"*illusion*\" — not \"illusion\". If it says \"**absolutely**\" your anchor "
+        "must say \"**absolutely**\". Asterisks, bold, italics — keep everything.\n"
+        "- Do not paraphrase. Do not summarize. Do not describe the section. Copy the text "
+        "character-for-character from the article above. It must be findable with Ctrl+F.\n"
+        "- If the article says \"dolphins are actually complete jerks about it,\" your "
+        "anchor_text is exactly \"dolphins are actually complete jerks about it\" — not "
+        "\"the dolphin paragraph\" or \"the part about dolphin behavior.\"\n\n"
+        "Spread images across the article. First image should hook early, save at least one "
+        "banger for the closing section. Don't cluster them.\n\n"
+        f"Output ONLY valid JSON with an \"image_cards\" array containing exactly {image_count} entries. "
+        f"No markdown fences, no preamble, no sign-off. Just the JSON object."
+    )
+
+
+@app.get("/api/step/5/data")
+async def get_step5():
+    """Get Step 5 stored data."""
+    return get_step5_data()
+
+
+@app.put("/api/step/5/data")
+async def update_step5(body: Step5DataUpdate):
+    """Update Step 5 data (manual edit)."""
+    data = body.model_dump()
+    if not save_step5_data(data):
+        return {"ok": False, "error": "No project loaded. Go to Project and create or load one first."}
+    log_entry("INFO", 5, f"Step 5 data updated. Image cards: {len(data.get('image_cards', []))}")
+    return {"ok": True}
+
+
+@app.get("/api/step/5/params")
+async def get_step5_params_route():
+    """Get Step 5 parameters."""
+    params = get_step5_params()
+    params["available_models"] = STEP5_MODELS
+    return params
+
+
+@app.put("/api/step/5/params")
+async def update_step5_params(body: Step5ParamsUpdate):
+    """Update Step 5 parameters."""
+    params = body.model_dump()
+    save_step5_params(params)
+    log_entry("INFO", 5, f"Step 5 params updated. Model: {params['model']}, Temp: {params['temperature']}, Thinking budget: {params.get('thinking_budget', 0)}")
+    return {"ok": True}
+
+
+@app.get("/api/step/5/user-message")
+async def get_step5_user_message():
+    """Get the user message preview for Step 5 — what will be sent to the model."""
+    step4_data = get_step4_data()
+    step5_data = get_step5_data()
+    styled_article = step4_data.get("styled_article", "")
+    image_count = step5_data.get("image_count", 3)
+    if not styled_article.strip():
+        return {"user_message": "", "warning": "Step 4 has no article yet. Run Step 4 (Style Rewrite) first.", "image_count": image_count}
+    user_message = _build_step5_user_message(styled_article, image_count)
+    return {"user_message": user_message, "image_count": image_count}
+
+
+@app.post("/api/step/5/run")
+async def run_step5():
+    """Execute Step 5: plan image placements for the styled article."""
+    import httpx
+    import asyncio
+
+    step4_data = get_step4_data()
+    step5_data = get_step5_data()
+    params = get_step5_params()
+    settings = load_settings()
+
+    if not _current_project_path:
+        return {"ok": False, "error": "No project loaded."}
+
+    # Validate Step 4 is done
+    styled_article = step4_data.get("styled_article", "")
+    if step4_data.get("status") != "completed" or not styled_article.strip():
+        return {"ok": False, "error": "Step 4 is not complete. Run Step 4 (Style Rewrite) first."}
+
+    # Validate image count
+    image_count = step5_data.get("image_count", 3)
+    if image_count < 1 or image_count > 20:
+        return {"ok": False, "error": f"Image count must be between 1 and 20 (got {image_count})."}
+
+    api_key = settings.get("anthropic_key", "").strip()
+    if not api_key:
+        step5_data["status"] = "failed"
+        step5_data["error"] = "No Anthropic API key configured. Go to Settings to add one."
+        save_step5_data(step5_data)
+        return {"ok": False, "error": step5_data["error"]}
+
+    step5_data["status"] = "running"
+    step5_data["error"] = None
+    save_step5_data(step5_data)
+
+    model = params.get("model", "claude-haiku-4-5")
+    temperature = params.get("temperature", 1.0)
+    max_tokens = params.get("max_tokens", 8192)
+    thinking_budget = params.get("thinking_budget", 1600)
+    effort = params.get("effort", "high")
+    system_prompt = params.get("system_prompt", STEP5_DEFAULT_PARAMS["system_prompt"])
+
+    user_message = _build_step5_user_message(styled_article, image_count)
+
+    log_entry("INFO", 5, (
+        f"Planning {image_count} images for styled article. Article: {len(styled_article)} chars.\n"
+        f"--- SYSTEM ---\n{system_prompt[:300]}...\n"
+        f"--- USER ---\n{user_message[:500]}..."
+    ))
+
+    # Build model-appropriate thinking config with structured JSON output
+    is_haiku = model.startswith("claude-haiku")
+    if is_haiku:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": 1.0,
+            "system": system_prompt,
+            "thinking": {"type": "enabled", "budget_tokens": thinking_budget},
+            "output_config": {
+                "format": {"type": "json_schema", "schema": STEP5_OUTPUT_SCHEMA},
+            },
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        log_entry("INFO", 5, f"Image planning with {model} (thinking budget: {thinking_budget})")
+    else:
+        request_body = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_prompt,
+            "thinking": {"type": "adaptive"},
+            "output_config": {
+                "format": {"type": "json_schema", "schema": STEP5_OUTPUT_SCHEMA},
+                "effort": effort,
+            },
+            "messages": [{"role": "user", "content": user_message}],
+        }
+        log_entry("INFO", 5, f"Image planning with {model} (adaptive thinking, effort: {effort})")
+
+    # Retry loop — 2 attempts
+    for attempt in range(1, 3):
+        try:
+            async with httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json=request_body,
+                )
+
+            if resp.status_code == 200:
+                result = resp.json()
+                content_blocks = result.get("content", [])
+                response_text = ""
+                for block in content_blocks:
+                    if block.get("type") == "text":
+                        response_text += block.get("text", "")
+
+                if response_text.strip():
+                    # Parse JSON response
+                    try:
+                        parsed = json.loads(response_text)
+                        raw_cards = parsed.get("image_cards", [])
+
+                        if not isinstance(raw_cards, list):
+                            raise ValueError(f"Expected 'image_cards' array, got {type(raw_cards).__name__}")
+
+                        # Add status tracking fields to each card for Step 6
+                        image_cards = []
+                        for i, card in enumerate(raw_cards):
+                            card["id"] = card.get("id", i + 1)
+                            card["status"] = "completed"
+                            card["error"] = None
+                            image_cards.append(card)
+
+                        step5_data["image_cards"] = image_cards
+                        step5_data["status"] = "completed"
+                        step5_data["last_run"] = dt.datetime.now().isoformat()
+                        step5_data["error"] = None
+                        save_step5_data(step5_data)
+                        usage = result.get("usage", {})
+                        log_entry("INFO", 5, (
+                            f"Step 5 completed — {len(image_cards)} image cards planned, "
+                            f"input_tokens={usage.get('input_tokens', 'N/A')}, "
+                            f"output_tokens={usage.get('output_tokens', 'N/A')}"
+                        ))
+                        return {"ok": True, "image_cards": image_cards}
+
+                    except (json.JSONDecodeError, ValueError) as parse_err:
+                        log_entry("ERROR", 5, f"Step 5 — failed to parse JSON response (attempt {attempt}): {parse_err}")
+                        step5_data["status"] = "failed"
+                        step5_data["error"] = f"Model returned invalid JSON (attempt {attempt}): {str(parse_err)}. Raw: {response_text[:500]}"
+                else:
+                    log_entry("ERROR", 5, f"Step 5 — empty response (attempt {attempt})")
+                    step5_data["status"] = "failed"
+                    step5_data["error"] = f"Model returned empty response (attempt {attempt})"
+            else:
+                error_detail = "Unknown error"
+                try:
+                    err_data = resp.json()
+                    err = err_data.get("error", {})
+                    error_detail = err.get("message", resp.text[:500])
+                except Exception:
+                    error_detail = resp.text[:500]
+
+                log_entry("ERROR", 5, f"Anthropic API error ({resp.status_code}) attempt {attempt}: {error_detail}")
+                step5_data["status"] = "failed"
+                step5_data["error"] = f"API error ({resp.status_code}) attempt {attempt}: {error_detail}"
+
+        except httpx.TimeoutException:
+            log_entry("ERROR", 5, f"Anthropic timeout on attempt {attempt}")
+            step5_data["status"] = "failed"
+            step5_data["error"] = f"Request timed out after 180s (attempt {attempt})"
+        except Exception as e:
+            log_entry("ERROR", 5, f"Anthropic unexpected error attempt {attempt}: {str(e)}")
+            step5_data["status"] = "failed"
+            step5_data["error"] = f"Unexpected error (attempt {attempt}): {str(e)}"
+
+        # Retry with delay if not last attempt
+        if attempt == 1:
+            log_entry("WARN", 5, "Step 5 failed attempt 1. Retrying in 3s...")
+            await asyncio.sleep(3)
+
+    save_step5_data(step5_data)
+    return {"ok": False, "error": step5_data["error"]}
+
+
+# ============================================================
+# Step 6 — Image Generation (OpenAI)
+# ============================================================
+
+STEP6_DEFAULT_PARAMS = {
+    "model": "gpt-image-1-mini",
+    "size": "1024x1024",
+    "quality": "high",
+}
+
+STEP6_MODELS = [
+    {"id": "gpt-image-1-mini", "name": "GPT Image 1 Mini (Cheapest)"},
+    {"id": "gpt-image-1", "name": "GPT Image 1"},
+    {"id": "gpt-image-1.5", "name": "GPT Image 1.5"},
+    {"id": "gpt-image-2", "name": "GPT Image 2 (Best)"},
+]
+
+STEP6_SIZES = [
+    {"id": "1024x1024", "name": "1024×1024 (Square)"},
+    {"id": "1536x1024", "name": "1536×1024 (Landscape)"},
+    {"id": "1024x1536", "name": "1024×1536 (Portrait)"},
+]
+
+STEP6_QUALITIES = [
+    {"id": "low", "name": "Low — fastest, cheapest"},
+    {"id": "medium", "name": "Medium — balanced"},
+    {"id": "high", "name": "High — best quality"},
+]
+
+
+def get_step6_params() -> dict:
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step6_params.json"
+        if params_file.exists():
+            with open(params_file) as f:
+                return json.load(f)
+    return dict(STEP6_DEFAULT_PARAMS)
+
+
+def save_step6_params(params: dict) -> None:
+    global _current_project_path
+    if _current_project_path:
+        params_file = _current_project_path / "step6_params.json"
+        with open(params_file, "w") as f:
+            json.dump(params, f, indent=2)
+
+
+def get_step6_data() -> dict:
+    global _current_project_path
+    if _current_project_path:
+        step_file = _current_project_path / "step6.json"
+        if step_file.exists():
+            with open(step_file) as f:
+                return json.load(f)
+    return {"image_cards": [], "status": "idle", "last_run": None, "error": None}
+
+
+def save_step6_data(data: dict) -> bool:
+    global _current_project_path
+    if not _current_project_path:
+        return False
+    step_file = _current_project_path / "step6.json"
+    with open(step_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return True
+
+
+def _init_step6_cards_from_step5(step6_data: dict) -> None:
+    """Populate step6 image_cards from step5 if step6 is empty."""
+    if step6_data.get("image_cards"):
+        return  # already has cards
+    step5_data = get_step5_data()
+    step5_cards = step5_data.get("image_cards", [])
+    if not step5_cards:
+        return
+    image_cards = []
+    for card in step5_cards:
+        image_cards.append({
+            "id": card.get("id", 0),
+            "anchor_text": card.get("anchor_text", ""),
+            "caption": card.get("caption", ""),
+            "image_prompt": card.get("image_prompt", ""),
+            "rationale": card.get("rationale", ""),
+            "image_b64": None,
+            "status": "idle",
+            "error": None,
+            "last_run": None,
+        })
+    step6_data["image_cards"] = image_cards
+
+
+def _find_step6_card_index(cards: list, card_id: int) -> int | None:
+    for i, c in enumerate(cards):
+        if c.get("id") == card_id:
+            return i
+    return None
+
+
+def _update_step6_aggregate_status(data: dict) -> None:
+    cards = data.get("image_cards", [])
+    if not cards:
+        data["status"] = "idle"
+        return
+    statuses = {c.get("status") for c in cards}
+    if "running" in statuses:
+        data["status"] = "running"
+    elif "failed" in statuses and "completed" not in statuses and "idle" not in statuses:
+        data["status"] = "failed"
+    elif all(s == "completed" for s in statuses):
+        data["status"] = "completed"
+    elif any(s == "completed" for s in statuses):
+        data["status"] = "partial"
+    else:
+        data["status"] = "idle"
+
+
+class Step6DataUpdate(BaseModel):
+    image_cards: list = []
+    status: str = "idle"
+    error: str | None = None
+
+
+class Step6ParamsUpdate(BaseModel):
+    model: str = "gpt-image-1-mini"
+    size: str = "1024x1024"
+    quality: str = "high"
+
+
+async def _generate_step6_image(card: dict, params: dict, api_key: str) -> None:
+    """Generate a single image via OpenAI and update the card."""
+    import httpx
+
+    prompt = card.get("image_prompt", "")
+    if not prompt.strip():
+        card["status"] = "failed"
+        card["error"] = "No image prompt — card may be missing data from Step 5."
+        return
+
+    request_body = {
+        "model": params.get("model", "gpt-image-1-mini"),
+        "prompt": prompt,
+        "n": 1,
+        "size": params.get("size", "1024x1024"),
+        "quality": params.get("quality", "low"),
+    }
+
+    log_entry("INFO", 6, f"Generating image for card #{card.get('id')} — model: {request_body['model']}, size: {request_body['size']}, quality: {request_body['quality']}")
+
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/images/generations",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=request_body,
+            )
+
+        if resp.status_code == 200:
+            result = resp.json()
+            data_list = result.get("data", [])
+            if data_list and data_list[0].get("b64_json"):
+                card["image_b64"] = data_list[0]["b64_json"]
+                card["status"] = "completed"
+                card["last_run"] = dt.datetime.now().isoformat()
+                card["error"] = None
+                log_entry("INFO", 6, f"Card #{card.get('id')} image generated successfully.")
+            else:
+                card["status"] = "failed"
+                card["error"] = "OpenAI returned no image data."
+                log_entry("ERROR", 6, f"Card #{card.get('id')}: no image data in response.")
+        else:
+            error_detail = "Unknown error"
+            try:
+                err_data = resp.json()
+                err = err_data.get("error", {})
+                error_detail = err.get("message", resp.text[:500])
+            except Exception:
+                error_detail = resp.text[:500]
+            card["status"] = "failed"
+            card["error"] = f"OpenAI error ({resp.status_code}): {error_detail}"
+            log_entry("ERROR", 6, f"Card #{card.get('id')} OpenAI error ({resp.status_code}): {error_detail}")
+
+    except httpx.TimeoutException:
+        card["status"] = "failed"
+        card["error"] = "Request timed out after 120s"
+        log_entry("ERROR", 6, f"Card #{card.get('id')} timeout.")
+    except Exception as e:
+        card["status"] = "failed"
+        card["error"] = f"Unexpected error: {str(e)}"
+        log_entry("ERROR", 6, f"Card #{card.get('id')} unexpected error: {str(e)}")
+
+
+@app.get("/api/step/6/data")
+async def get_step6():
+    data = get_step6_data()
+    _init_step6_cards_from_step5(data)
+    return data
+
+
+@app.put("/api/step/6/data")
+async def update_step6(body: Step6DataUpdate):
+    data = body.model_dump()
+    if not save_step6_data(data):
+        return {"ok": False, "error": "No project loaded."}
+    log_entry("INFO", 6, f"Step 6 data updated. Cards: {len(data.get('image_cards', []))}")
+    return {"ok": True}
+
+
+@app.get("/api/step/6/params")
+async def get_step6_params_route():
+    params = get_step6_params()
+    params["available_models"] = STEP6_MODELS
+    params["available_sizes"] = STEP6_SIZES
+    params["available_qualities"] = STEP6_QUALITIES
+    return params
+
+
+@app.put("/api/step/6/params")
+async def update_step6_params(body: Step6ParamsUpdate):
+    params = body.model_dump()
+    save_step6_params(params)
+    log_entry("INFO", 6, f"Step 6 params updated. Model: {params['model']}, Size: {params['size']}, Quality: {params['quality']}")
+    return {"ok": True}
+
+
+@app.post("/api/step/6/run")
+async def run_step6():
+    """Generate images for ALL cards sequentially."""
+    step6_data = get_step6_data()
+    params = get_step6_params()
+    settings = load_settings()
+
+    if not _current_project_path:
+        return {"ok": False, "error": "No project loaded."}
+
+    _init_step6_cards_from_step5(step6_data)
+    cards = step6_data.get("image_cards", [])
+
+    if not cards:
+        return {"ok": False, "error": "No image cards. Run Step 5 (Image Planning) first."}
+
+    api_key = settings.get("openai_key", "").strip()
+    if not api_key:
+        step6_data["status"] = "failed"
+        step6_data["error"] = "No OpenAI API key configured. Go to Settings to add one."
+        save_step6_data(step6_data)
+        return {"ok": False, "error": step6_data["error"]}
+
+    step6_data["status"] = "running"
+    step6_data["error"] = None
+    save_step6_data(step6_data)
+
+    log_entry("INFO", 6, f"Starting image generation for {len(cards)} cards")
+
+    for card in cards:
+        if card.get("status") == "completed":
+            continue  # skip already-generated cards
+        card["status"] = "running"
+        card["error"] = None
+        save_step6_data(step6_data)
+        await _generate_step6_image(card, params, api_key)
+        save_step6_data(step6_data)
+
+    _update_step6_aggregate_status(step6_data)
+    save_step6_data(step6_data)
+    log_entry("INFO", 6, f"Step 6 image generation complete. Status: {step6_data['status']}")
+    return {"ok": True, "image_cards": step6_data["image_cards"]}
+
+
+@app.post("/api/step/6/run-card/{card_id}")
+async def run_step6_card(card_id: int):
+    """Generate image for a SINGLE card."""
+    step6_data = get_step6_data()
+    params = get_step6_params()
+    settings = load_settings()
+
+    if not _current_project_path:
+        return {"ok": False, "error": "No project loaded."}
+
+    _init_step6_cards_from_step5(step6_data)
+    cards = step6_data.get("image_cards", [])
+
+    idx = _find_step6_card_index(cards, card_id)
+    if idx is None:
+        return {"ok": False, "error": f"Card #{card_id} not found."}
+
+    api_key = settings.get("openai_key", "").strip()
+    if not api_key:
+        return {"ok": False, "error": "No OpenAI API key configured."}
+
+    card = cards[idx]
+    card["status"] = "running"
+    card["error"] = None
+    save_step6_data(step6_data)
+
+    await _generate_step6_image(card, params, api_key)
+
+    _update_step6_aggregate_status(step6_data)
+    save_step6_data(step6_data)
+    return {"ok": True, "card": card}
 
 
 if __name__ == "__main__":

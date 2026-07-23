@@ -16,8 +16,9 @@ async function loadSidebarProjectInfo() {
             nameEl.textContent = 'No project';
         }
 
+        // Update dot statuses
         if (project.steps) {
-            for (let i = 1; i <= 5; i++) {
+            for (let i = 1; i <= 7; i++) {
                 const dot = document.getElementById(`dot-step${i}`);
                 if (dot && project.steps[i]) {
                     dot.className = 'step-dot ' + (project.steps[i].status || 'idle');
@@ -25,8 +26,7 @@ async function loadSidebarProjectInfo() {
             }
         }
 
-        // Access gating: step pages require a project to be loaded
-        // Step N requires Step N-1 to be completed (sequential pipeline)
+        // Access gating
         const path = window.location.pathname;
         const isStepPage = /^\/step\/(\d+)/.test(path);
         const currentStepNum = isStepPage ? parseInt(path.match(/^\/step\/(\d+)/)[1]) : null;
@@ -36,7 +36,6 @@ async function loadSidebarProjectInfo() {
             return;
         }
 
-        // Visually gate sidebar step links — project required + sequential gating
         document.querySelectorAll('.step-link').forEach(link => {
             const hrefMatch = link.getAttribute('href').match(/^\/step\/(\d+)/);
             if (!hrefMatch) return;
@@ -48,7 +47,6 @@ async function loadSidebarProjectInfo() {
             if (!hasProject) {
                 gated = true;
             } else if (stepNum > 1 && project.steps) {
-                // Check if the previous step is completed
                 const prevStatus = project.steps[stepNum - 1]?.status;
                 if (prevStatus !== 'completed') {
                     gated = true;
@@ -62,9 +60,11 @@ async function loadSidebarProjectInfo() {
                     e.preventDefault();
                     window.location.replace(redirectTo);
                 });
+            } else {
+                link.classList.remove('gated');
             }
 
-            // If user is on a gated step page, redirect to the prerequisite
+            // If user is currently on a gated step, redirect them away
             if (currentStepNum === stepNum && gated) {
                 window.location.replace(redirectTo);
             }

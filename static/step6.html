@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Step 6: Image Generation — ArtGen</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <nav id="sidebar">
+            <h1>⚡ ArtGen</h1>
+            <div class="project-name" id="sidebar-project-name">No project</div>
+            <div class="nav-section">Pipeline</div>
+            <a href="/"><span class="step-dot" id="dot-step0"></span>0. Project</a>
+            <a href="/step/1" class="step-link"><span class="step-dot idle" id="dot-step1"></span>1. Outline</a>
+            <a href="/step/2" class="step-link"><span class="step-dot idle" id="dot-step2"></span>2. Draft</a>
+            <a href="/step/3" class="step-link"><span class="step-dot idle" id="dot-step3"></span>3. Article Draft</a>
+            <a href="/step/4" class="step-link"><span class="step-dot idle" id="dot-step4"></span>4. Style Rewrite</a>
+            <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Image Planning</a>
+            <a href="/step/6" class="active step-link"><span class="step-dot idle" id="dot-step6"></span>6. Generate Images</a>
+            <a href="/step/7" class="step-link"><span class="step-dot idle" id="dot-step7"></span>7. Final Assembly</a>
+            <div class="nav-section">System</div>
+            <a href="/settings">⚙ Settings</a>
+            <a href="/log">📋 System Log</a>
+        </nav>
+
+        <div id="main">
+            <div id="content">
+                <div class="page-header">
+                    <h1>Step 6: Image Generation</h1>
+                    <p>Generate images from the plans created in Step 5 using OpenAI</p>
+                </div>
+
+                <!-- Params Card -->
+                <div class="card">
+                    <h2>⚙ Image Parameters</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="step6-model">Model</label>
+                            <select id="step6-model"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="step6-size">Size</label>
+                            <select id="step6-size"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="step6-quality">Quality</label>
+                            <select id="step6-quality"></select>
+                        </div>
+                    </div>
+                    <button id="step6-save-params-btn" class="secondary">Save Parameters</button>
+                    <span id="step6-params-status"></span>
+                </div>
+
+                <div id="step6-error" style="display:none;"></div>
+
+                <!-- Run -->
+                <div class="card" id="step6-controls-card" style="display:none;">
+                    <h2>Generate Images</h2>
+                    <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">
+                        Uses OpenAI's image generation API to create images from the prompts planned in Step 5.
+                        Run cards individually or generate all at once.
+                    </p>
+                    <button id="step6-run-all-btn">🖼 Generate All Images</button>
+                    <span id="step6-run-status"></span>
+                </div>
+
+                <!-- Gated -->
+                <div class="card" id="step6-gated-card" style="display:none;">
+                    <h2>⏳ Waiting for Step 5</h2>
+                    <p style="color:var(--text-secondary)">
+                        Step 5 (Image Planning) must be completed before generating images.
+                        <span id="step6-gated-status"></span>
+                    </p>
+                </div>
+
+                <!-- Image Cards Output -->
+                <div id="step6-output"></div>
+            </div>
+            <div id="log-widget-header">
+                <span><button id="toggle-log-btn" class="toggle-log-btn">▶ Show</button> System Log</span>
+                <a href="/log">View Full Log →</a>
+            </div>
+            <div id="log-widget"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/sidebar.js"></script>
+    <script src="/static/js/log.js"></script>
+    <script src="/static/js/step6.js"></script>
+</body>
+</html>

@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('validate-anthropic-btn').addEventListener('click', validateAnthropic);
     document.getElementById('save-gemini-btn').addEventListener('click', saveGeminiKey);
     document.getElementById('validate-gemini-btn').addEventListener('click', validateGemini);
+    document.getElementById('save-openai-btn').addEventListener('click', saveOpenAIKey);
     document.getElementById('reset-all-btn').addEventListener('click', resetAllData);
 });
 
@@ -18,6 +19,9 @@ async function loadSettings() {
         }
         if (settings.gemini_key) {
             document.getElementById('gemini-key').value = settings.gemini_key;
+        }
+        if (settings.openai_key) {
+            document.getElementById('openai-key').value = settings.openai_key;
         }
     } catch (e) {
         console.error('Failed to load settings:', e);
@@ -47,6 +51,22 @@ async function saveGeminiKey() {
     btn.textContent = 'Saving...';
     try {
         await API.put('/api/settings', { gemini_key: key });
+        btn.textContent = 'Saved!';
+        setTimeout(() => { btn.disabled = false; btn.textContent = 'Save Key'; }, 1500);
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Save Key';
+        alert('Failed to save: ' + e.message);
+    }
+}
+
+async function saveOpenAIKey() {
+    const key = document.getElementById('openai-key').value;
+    const btn = document.getElementById('save-openai-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    try {
+        await API.put('/api/settings', { openai_key: key });
         btn.textContent = 'Saved!';
         setTimeout(() => { btn.disabled = false; btn.textContent = 'Save Key'; }, 1500);
     } catch (e) {
@@ -114,6 +134,7 @@ async function resetAllData() {
             // Clear key inputs
             document.getElementById('anthropic-key').value = '';
             document.getElementById('gemini-key').value = '';
+            document.getElementById('openai-key').value = '';
             setTimeout(() => { location.reload(); }, 1500);
         } else {
             status.innerHTML = '<span style="color:var(--error)">✗ ' + result.error + '</span>';

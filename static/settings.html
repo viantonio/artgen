@@ -18,6 +18,8 @@
             <a href="/step/3" class="step-link"><span class="step-dot idle" id="dot-step3"></span>3. Article Draft</a>
             <a href="/step/4" class="step-link"><span class="step-dot idle" id="dot-step4"></span>4. Style Rewrite</a>
             <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Images</a>
+            <a href="/step/6" class="step-link"><span class="step-dot idle" id="dot-step6"></span>6. Generate Images</a>
+            <a href="/step/7" class="step-link"><span class="step-dot idle" id="dot-step7"></span>7. Final Assembly</a>
             <div class="nav-section">System</div>
             <a href="/settings" class="active">⚙ Settings</a>
             <a href="/log">📋 System Log</a>
@@ -27,7 +29,7 @@
             <div id="content">
                 <div class="page-header">
                     <h1>⚙ Settings</h1>
-                    <p>Configure API keys for Anthropic and Gemini</p>
+                    <p>Configure API keys for Anthropic, OpenAI, and Gemini</p>
                 </div>
 
                 <div class="card">
@@ -53,6 +55,21 @@
                         <button id="save-gemini-btn">Save Key</button>
                         <button id="validate-gemini-btn" class="secondary">Validate</button>
                         <span id="gemini-status"></span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>OpenAI API Key</h2>
+                    <p style="font-size:12px; color:var(--text-secondary); margin-bottom:8px;">
+                        Used by Step 6 for image generation (<code>gpt-image-1-mini</code>).
+                    </p>
+                    <div class="form-group">
+                        <label for="openai-key">API Key</label>
+                        <input type="password" id="openai-key" placeholder="sk-proj-...">
+                    </div>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button id="save-openai-btn">Save Key</button>
+                        <span id="openai-status"></span>
                     </div>
                 </div>
 

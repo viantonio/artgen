@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ArtGen — Project</title>
+    <title>Step 7: Final Assembly — ArtGen</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -12,14 +12,14 @@
             <h1>⚡ ArtGen</h1>
             <div class="project-name" id="sidebar-project-name">No project</div>
             <div class="nav-section">Pipeline</div>
-            <a href="/" class="active"><span class="step-dot" id="dot-step0"></span>0. Project</a>
+            <a href="/"><span class="step-dot" id="dot-step0"></span>0. Project</a>
             <a href="/step/1" class="step-link"><span class="step-dot idle" id="dot-step1"></span>1. Outline</a>
             <a href="/step/2" class="step-link"><span class="step-dot idle" id="dot-step2"></span>2. Draft</a>
             <a href="/step/3" class="step-link"><span class="step-dot idle" id="dot-step3"></span>3. Article Draft</a>
             <a href="/step/4" class="step-link"><span class="step-dot idle" id="dot-step4"></span>4. Style Rewrite</a>
-            <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Images</a>
+            <a href="/step/5" class="step-link"><span class="step-dot idle" id="dot-step5"></span>5. Image Planning</a>
             <a href="/step/6" class="step-link"><span class="step-dot idle" id="dot-step6"></span>6. Generate Images</a>
-            <a href="/step/7" class="step-link"><span class="step-dot idle" id="dot-step7"></span>7. Final Assembly</a>
+            <a href="/step/7" class="active step-link"><span class="step-dot idle" id="dot-step7"></span>7. Final Assembly</a>
             <div class="nav-section">System</div>
             <a href="/settings">⚙ Settings</a>
             <a href="/log">📋 System Log</a>
@@ -28,37 +28,32 @@
         <div id="main">
             <div id="content">
                 <div class="page-header">
-                    <h1>0. Project</h1>
-                    <p>Create, load, or delete projects</p>
+                    <h1>Step 7: Final Assembly</h1>
+                    <p>Insert generated images into the styled article to produce the final piece</p>
                 </div>
 
-                <!-- Current Project -->
-                <div class="card" id="current-project-card" style="display:none;">
-                    <h2>📌 Current Project</h2>
-                    <div id="current-project-info"></div>
-                    <div style="display:flex; gap:8px; margin-top:8px;">
-                        <button id="save-project-btn">💾 Save</button>
-                    </div>
-                    <span id="save-status"></span>
+                <div id="step7-error" style="display:none;"></div>
+
+                <!-- Gated -->
+                <div class="card" id="step7-gated-card" style="display:none;">
+                    <h2>⏳ Waiting for Previous Steps</h2>
+                    <p style="color:var(--text-secondary)" id="step7-gated-status"></p>
                 </div>
 
-                <!-- New Project -->
-                <div class="card">
-                    <h2>➕ New Project</h2>
-                    <div class="form-group">
-                        <label for="project-name">Project Name (leave blank for auto-generated)</label>
-                        <input type="text" id="project-name" placeholder="e.g., Space Exploration History">
-                    </div>
-                    <button id="create-project-btn">Create Project</button>
-                    <span id="create-status"></span>
+                <!-- Controls -->
+                <div class="card" id="step7-controls-card" style="display:none;">
+                    <h2>Assemble Final Article</h2>
+                    <p style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;">
+                        Combines the styled article from Step 4 with the generated images from Step 6.
+                        Images are inserted at their anchor points with captions inline.
+                    </p>
+                    <button id="step7-assemble-btn">📄 Assemble Article</button>
                 </div>
 
-                <!-- All Projects -->
-                <div class="card">
-                    <h2>📂 All Projects</h2>
-                    <div id="project-list">
-                        <p style="color:var(--text-secondary)">No projects yet. Create one above.</p>
-                    </div>
+                <!-- Output -->
+                <div class="card" id="step7-output-card" style="display:none;">
+                    <h2>Final Article</h2>
+                    <div id="step7-output"></div>
                 </div>
             </div>
             <div id="log-widget-header">
@@ -72,6 +67,6 @@
     <script src="/static/js/api.js"></script>
     <script src="/static/js/sidebar.js"></script>
     <script src="/static/js/log.js"></script>
-    <script src="/static/js/project.js"></script>
+    <script src="/static/js/step7.js"></script>
 </body>
 </html>
