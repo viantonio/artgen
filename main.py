@@ -387,7 +387,7 @@ def load_project(proj_dir: Path) -> dict:
             project = json.load(f)
 
     steps = {}
-    for i in range(1, 7):
+    for i in range(1, 8):
         step_file = proj_dir / f"step{i}.json"
         if step_file.exists():
             with open(step_file) as f:
@@ -442,7 +442,7 @@ async def get_project():
         "created": proj.get("created"),
         "current_step": proj.get("current_step", 1),
         "exists": True,
-        "steps": {str(i): {"status": proj["steps"][i].get("status", "idle")} for i in range(1, 7)},
+        "steps": {str(i): {"status": proj["steps"][i].get("status", "idle")} for i in range(1, 8)},
     }
     return result
 
@@ -503,7 +503,7 @@ async def load_project_by_name(dir_name: str):
         "name": _current_project.get("name"),
         "dir_name": dir_name,
         "created": _current_project.get("created"),
-        "steps": {str(i): {"status": _current_project["steps"][i].get("status", "idle")} for i in range(1, 7)},
+        "steps": {str(i): {"status": _current_project["steps"][i].get("status", "idle")} for i in range(1, 8)},
     }
 
 
@@ -531,7 +531,7 @@ async def load_last_project():
         "name": _current_project.get("name"),
         "dir_name": proj_dir.name,
         "created": _current_project.get("created"),
-        "steps": {str(i): {"status": _current_project["steps"][i].get("status", "idle")} for i in range(1, 7)},
+        "steps": {str(i): {"status": _current_project["steps"][i].get("status", "idle")} for i in range(1, 8)},
     }
 
 
@@ -2844,6 +2844,360 @@ async def run_step6_card(card_id: int):
     _update_step6_aggregate_status(step6_data)
     save_step6_data(step6_data)
     return {"ok": True, "card": card}
+
+
+# --- Step 7: Final Assembly ---
+
+def get_step7_data() -> dict:
+    """Load Step 7 data from disk."""
+    global _current_project_path
+    if _current_project_path:
+        step_file = _current_project_path / "step7.json"
+        if step_file.exists():
+            with open(step_file) as f:
+                return json.load(f)
+    return {
+        "status": "idle", "html_path": None, "image_count": 0,
+        "placed_count": 0, "unplaced_cards": [], "last_run": None, "error": None,
+    }
+
+
+def save_step7_data(data: dict) -> bool:
+    """Persist Step 7 data to disk."""
+    global _current_project_path
+    if not _current_project_path:
+        return False
+    step_file = _current_project_path / "step7.json"
+    with open(step_file, "w") as f:
+        json.dump(data, f, indent=2)
+    return True
+
+
+def _fuzzy_find_anchor(article: str, anchor: str) -> int:
+    """Port of frontend fuzzyFindAnchor() — 4-tier fallback matching."""
+    import re
+
+    # 1. Exact match
+    idx = article.find(anchor)
+    if idx >= 0:
+        return idx
+
+    # 2. Normalized match — collapse whitespace, strip markdown formatting
+    def normalize(s: str) -> str:
+        s = re.sub(r'[*_~`]', '', s)
+        s = re.sub(r'\s+', ' ', s).strip().lower()
+        return s
+
+    norm_article = normalize(article)
+    norm_anchor = normalize(anchor)
+    idx = norm_article.find(norm_anchor)
+    if idx >= 0:
+        # Map back to approximate position in original text
+        return article.lower().find(norm_anchor[:40])
+
+    # 3. Try with first 60 chars of anchor
+    short_anchor = norm_anchor[:60]
+    idx = norm_article.find(short_anchor)
+    if idx >= 0:
+        return article.lower().find(short_anchor[:30])
+
+    # 4. Word-by-word — find where first 4 words appear
+    first_words = ' '.join(norm_anchor.split()[:4])
+    if len(first_words) > 10:
+        idx = norm_article.find(first_words)
+        if idx >= 0:
+            return article.lower().find(first_words[:20])
+
+    return -1
+
+
+def _render_markdown_post_escape(text: str) -> str:
+    """Apply markdown patterns to already-HTML-escaped text.
+    Matches the frontend JS logic exactly."""
+    import re
+
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', r'<em>\1</em>', text)
+    text = re.sub(r'^## (.+)$', r'<h2 style="margin-top:24px;">\1</h2>', text, flags=re.MULTILINE)
+    text = re.sub(r'^---$', r'<hr style="margin:24px 0; border:none; border-top:1px solid #ccc;" />', text, flags=re.MULTILINE)
+
+    return text
+
+
+ARTICLE_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 18px;
+    line-height: 1.8;
+    color: #222;
+    background: #fff;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }}
+  h1 {{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    line-height: 1.3;
+    margin-bottom: 24px;
+    color: #111;
+  }}
+  h2 {{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 32px;
+    margin-bottom: 12px;
+    color: #111;
+  }}
+  p {{ margin-bottom: 16px; }}
+  strong {{ font-weight: 700; }}
+  em {{ font-style: italic; }}
+  figure {{
+    margin: 32px 0;
+    text-align: center;
+  }}
+  figure img {{
+    max-width: 100%;
+    border-radius: 8px;
+    display: block;
+    margin: 0 auto;
+  }}
+  figcaption {{
+    margin-top: 10px;
+    font-size: 14px;
+    font-style: italic;
+    color: #666;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }}
+  hr {{
+    margin: 32px 0;
+    border: none;
+    border-top: 1px solid #ddd;
+  }}
+  @media (prefers-color-scheme: dark) {{
+    body {{ background: #1a1a1a; color: #ddd; }}
+    h1, h2 {{ color: #eee; }}
+    figcaption {{ color: #999; }}
+    hr {{ border-color: #333; }}
+  }}
+</style>
+</head>
+<body>
+<article>
+<h1>{title}</h1>
+{body}
+</article>
+</body>
+</html>"""
+
+
+def _assemble_article(styled_article: str, image_cards: list) -> dict:
+    """Assemble article text with images inserted at anchor points.
+    Returns {html_body, placed_count, unplaced_cards}."""
+    import html as html_mod
+
+    # Filter to completed cards with images
+    completed = [c for c in image_cards if c.get("status") == "completed" and c.get("image_b64")]
+
+    # Position each card
+    positioned = []
+    not_found = []
+
+    for card in completed:
+        anchor = card.get("anchor_text", "")
+        start_idx = _fuzzy_find_anchor(styled_article, anchor)
+        if start_idx < 0:
+            not_found.append(card)
+        else:
+            positioned.append({"card": card, "start_idx": start_idx})
+
+    # Sort by position
+    positioned.sort(key=lambda x: x["start_idx"])
+
+    # Build HTML — escape text, insert figures, then render markdown
+    html_body = ""
+    cursor = 0
+
+    for item in positioned:
+        card = item["card"]
+        anchor = card.get("anchor_text", "")
+        start_idx = item["start_idx"]
+
+        # Text up to and including the anchor (HTML-escaped)
+        html_body += html_mod.escape(styled_article[cursor:start_idx + len(anchor)])
+        cursor = start_idx + len(anchor)
+
+        # Insert image + caption (raw HTML, not escaped)
+        caption = html_mod.escape(card.get("caption", ""))
+        html_body += (
+            f'\n\n<figure style="margin:24px 0; text-align:center;">'
+            f'<img src="data:image/png;base64,{card["image_b64"]}" '
+            f'style="max-width:100%; border-radius:8px;" alt="{caption}" />'
+            f'<figcaption style="margin-top:8px; font-size:14px; font-style:italic; color:#888;">'
+            f'{caption}</figcaption>'
+            f'</figure>\n\n'
+        )
+
+    # Remaining text (HTML-escaped)
+    html_body += html_mod.escape(styled_article[cursor:])
+
+    # Apply markdown rendering
+    html_body = _render_markdown_post_escape(html_body)
+
+    return {
+        "html_body": html_body,
+        "placed_count": len(positioned),
+        "unplaced_cards": [
+            {"id": c.get("id"), "anchor_text": c.get("anchor_text", "")[:80]}
+            for c in not_found
+        ],
+    }
+
+
+@app.get("/api/step/7/data")
+async def get_step7():
+    """Get Step 7 metadata and status."""
+    data = get_step7_data()
+    if data.get("html_path") and _current_project_path:
+        data["download_url"] = f"/api/step/7/download?dir_name={_current_project_path.name}"
+    return data
+
+
+@app.post("/api/step/7/run")
+async def run_step7():
+    """Assemble the final article with images and save as self-contained HTML file."""
+    global _current_project_path
+
+    if not _current_project_path:
+        return {"ok": False, "error": "No project loaded."}
+
+    # Load Step 4 and Step 6 data
+    step4_data = get_step4_data()
+    step6_data = get_step6_data()
+
+    styled_article = step4_data.get("styled_article", "")
+    if not styled_article or not styled_article.strip():
+        return {"ok": False, "error": "No styled article available. Run Step 4 first."}
+
+    if step4_data.get("status") != "completed":
+        return {"ok": False, "error": "Step 4 is not completed. Finish Step 4 first."}
+
+    image_cards = step6_data.get("image_cards", [])
+    completed_cards = [c for c in image_cards if c.get("status") == "completed" and c.get("image_b64")]
+    if not completed_cards:
+        return {"ok": False, "error": "No generated images available. Run Step 6 first."}
+
+    # Initialize/update step7 data
+    step7_data = get_step7_data()
+    step7_data["status"] = "running"
+    step7_data["error"] = None
+    save_step7_data(step7_data)
+
+    log_entry("INFO", 7, f"Assembling final article with {len(completed_cards)} images")
+
+    try:
+        result = _assemble_article(styled_article, image_cards)
+
+        # Extract title from first ## heading or use project name
+        import re
+        title = "Article"
+        first_h2 = re.search(r'^##\s+(.+)$', styled_article, re.MULTILINE)
+        if first_h2:
+            title = first_h2.group(1).strip()
+        elif _current_project:
+            title = _current_project.get("name", "Article")
+
+        # Build full HTML document
+        full_html = ARTICLE_HTML_TEMPLATE.format(title=title, body=result["html_body"])
+
+        # Save article.html inside a subfolder named after the project
+        project_name = _current_project.get("name", "Article") if _current_project else "Article"
+        safe_name = "".join(c for c in project_name if c.isalnum() or c in " _-").strip().replace(" ", "_")
+        article_dir = _current_project_path / safe_name
+        article_dir.mkdir(exist_ok=True)
+        html_path = article_dir / "article.html"
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(full_html)
+
+        # Update step7 metadata
+        step7_data["status"] = "completed"
+        step7_data["html_path"] = str(html_path)
+        step7_data["image_count"] = len(completed_cards)
+        step7_data["placed_count"] = result["placed_count"]
+        step7_data["unplaced_cards"] = result["unplaced_cards"]
+        step7_data["last_run"] = dt.datetime.now().isoformat()
+        step7_data["error"] = None
+        save_step7_data(step7_data)
+
+        log_entry("INFO", 7,
+                   f"Article saved. {result['placed_count']}/{len(completed_cards)} images placed.")
+
+        return {
+            "ok": True,
+            "html_content": result["html_body"],
+            "download_url": f"/api/step/7/download?dir_name={_current_project_path.name}",
+            "image_count": len(completed_cards),
+            "placed_count": result["placed_count"],
+            "unplaced": result["unplaced_cards"],
+        }
+    except Exception as e:
+        step7_data["status"] = "failed"
+        step7_data["error"] = str(e)
+        save_step7_data(step7_data)
+        log_entry("ERROR", 7, f"Assembly failed: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/step/7/download")
+async def download_article(dir_name: str = None):
+    """Download the assembled article HTML file."""
+    from fastapi.responses import FileResponse
+
+    # Resolve project directory
+    if dir_name:
+        proj_dir = DATA_DIR / dir_name
+    elif _current_project_path:
+        proj_dir = _current_project_path
+    else:
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse("No project specified.", status_code=400)
+
+    # First check step7.json for the saved path
+    step7_file = proj_dir / "step7.json"
+    if step7_file.exists():
+        with open(step7_file) as f:
+            step7_data = json.load(f)
+        saved_path = step7_data.get("html_path")
+        if saved_path:
+            html_file = Path(saved_path)
+            if html_file.exists():
+                return FileResponse(
+                    str(html_file),
+                    media_type="text/html",
+                    filename="article.html",
+                    headers={"Content-Disposition": 'attachment; filename="article.html"'}
+                )
+
+    # Fallback: search for article.html in subdirectories
+    for candidate in proj_dir.rglob("article.html"):
+        return FileResponse(
+            str(candidate),
+            media_type="text/html",
+            filename="article.html",
+            headers={"Content-Disposition": 'attachment; filename="article.html"'}
+        )
+
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("Article not yet assembled. Run Step 7 first.", status_code=404)
 
 
 if __name__ == "__main__":

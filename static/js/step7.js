@@ -1,4 +1,4 @@
-// Step 7: Final Assembly — pure frontend, no API calls
+// Step 7: Final Assembly — backend-driven with local file output
 
 let _articleText = '';
 let _imageCards = [];
@@ -51,7 +51,7 @@ async function loadStep7Data() {
             const completed = _imageCards.length;
             const total = step6.image_cards.length;
             document.getElementById('step7-assemble-btn').textContent =
-                `📄 Assemble Article (${completed}/${total} images ready)`;
+                `📄 Assemble & Save Article (${completed}/${total} images ready)`;
         }
     } catch (e) {
         console.error('Failed to load Step 7 data:', e);
@@ -59,124 +59,74 @@ async function loadStep7Data() {
     }
 }
 
-function fuzzyFindAnchor(article, anchor) {
-    // 1. Exact match
-    let idx = article.indexOf(anchor);
-    if (idx >= 0) return idx;
-
-    // 2. Normalized match — collapse whitespace, strip markdown formatting
-    const norm = (s) => s.replace(/[*_~`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    const normArticle = norm(article);
-    const normAnchor = norm(anchor);
-    idx = normArticle.indexOf(normAnchor);
-    if (idx >= 0) {
-        // Map back to approximate position in original text
-        return article.toLowerCase().indexOf(normAnchor.substring(0, 40));
-    }
-
-    // 3. Try with first 60 chars of anchor
-    const shortAnchor = normAnchor.substring(0, 60);
-    idx = normArticle.indexOf(shortAnchor);
-    if (idx >= 0) {
-        return article.toLowerCase().indexOf(shortAnchor.substring(0, 30));
-    }
-
-    // 4. Word-by-word — find where first 4 words appear
-    const firstWords = normAnchor.split(/\s+/).slice(0, 4).join(' ');
-    if (firstWords.length > 10) {
-        idx = normArticle.indexOf(firstWords);
-        if (idx >= 0) {
-            return article.toLowerCase().indexOf(firstWords.substring(0, 20));
-        }
-    }
-
-    return -1;
-}
-
-function assembleArticle() {
-    if (!_articleText) {
-        showError('No article text available.');
-        return;
-    }
-
-    if (_imageCards.length === 0) {
-        showError('No generated images available. Run Step 6 first.');
-        return;
-    }
-
+async function assembleArticle() {
+    const btn = document.getElementById('step7-assemble-btn');
     const outputCard = document.getElementById('step7-output-card');
     const output = document.getElementById('step7-output');
+    const errorEl = document.getElementById('step7-error');
 
-    // Position each card using fuzzy matching, get {card, startIdx, endIdx}
-    const positioned = [];
-    const notFound = [];
+    btn.disabled = true;
+    btn.textContent = '⏳ Assembling...';
+    errorEl.style.display = 'none';
 
-    for (const card of _imageCards) {
-        const anchor = card.anchor_text || '';
-        const startIdx = fuzzyFindAnchor(_articleText, anchor);
-        if (startIdx < 0) {
-            notFound.push(card);
-        } else {
-            // Use actual text from article at that position to determine end
-            positioned.push({ card, startIdx });
+    try {
+        const result = await API.post('/api/step/7/run', {});
+
+        if (!result.ok) {
+            showError(result.error);
+            btn.disabled = false;
+            btn.textContent = '📄 Assemble & Save Article';
+            return;
         }
-    }
 
-    // Sort by position
-    positioned.sort((a, b) => a.startIdx - b.startIdx);
-
-    // Build assembled article by slicing at anchor points
-    let html = '';
-    let cursor = 0;
-
-    for (const { card, startIdx } of positioned) {
-        const anchor = card.anchor_text || '';
-
-        // Text up to and including the anchor
-        html += escapeHtml(_articleText.substring(cursor, startIdx + anchor.length));
-        cursor = startIdx + anchor.length;
-
-        // Insert image + caption
-        html += `\n\n<figure style="margin:24px 0; text-align:center;">`;
-        html += `<img src="data:image/png;base64,${card.image_b64}" style="max-width:100%; border-radius:8px;" alt="${escapeHtml(card.caption || '')}" />`;
-        html += `<figcaption style="margin-top:8px; font-size:14px; font-style:italic; color:#888;">${escapeHtml(card.caption || '')}</figcaption>`;
-        html += `</figure>\n\n`;
-    }
-
-    // Remaining text
-    html += escapeHtml(_articleText.substring(cursor));
-
-    // Light markdown rendering
-    html = html
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, '<em>$1</em>')
-        .replace(/^## (.+)$/gm, '<h2 style="margin-top:24px;">$1</h2>')
-        .replace(/^---$/gm, '<hr style="margin:24px 0; border:none; border-top:1px solid var(--border);" />');
-
-    let resultHtml = `
-        <div style="margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-size:12px; color:var(--text-secondary);">${positioned.length} image${positioned.length !== 1 ? 's' : ''} inserted</span>
-            <span style="font-size:12px; color:var(--success); font-weight:600;">✓ Assembled</span>
-        </div>
-    `;
-
-    if (notFound.length > 0) {
-        resultHtml += `
-            <div class="error-box" style="margin-bottom:16px;">
-                ⚠ ${notFound.length} image${notFound.length !== 1 ? 's' : ''} could not be placed — anchor text not found in article.
-                Cards: ${notFound.map(c => `#${c.id}`).join(', ')}
+        // Build result display
+        let resultHtml = `
+            <div style="margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                <span style="font-size:12px; color:var(--text-secondary);">
+                    ${result.placed_count} image${result.placed_count !== 1 ? 's' : ''} inserted
+                </span>
+                <span style="font-size:12px; color:var(--success); font-weight:600;">✓ Assembled & Saved</span>
             </div>
         `;
+
+        if (result.unplaced && result.unplaced.length > 0) {
+            resultHtml += `
+                <div class="error-box" style="margin-bottom:16px;">
+                    ⚠ ${result.unplaced.length} image${result.unplaced.length !== 1 ? 's' : ''} could not be placed — anchor text not found in article.
+                    Cards: ${result.unplaced.map(c => `#${c.id}`).join(', ')}
+                </div>
+            `;
+        }
+
+        // Download button
+        resultHtml += `
+            <div style="margin-bottom:16px;">
+                <a href="${result.download_url}" class="btn" style="display:inline-block; text-decoration:none;">
+                    💾 Download Article (HTML)
+                </a>
+                <span style="margin-left:8px; font-size:12px; color:var(--text-secondary);">
+                    Self-contained file with embedded images — works offline
+                </span>
+            </div>
+        `;
+
+        // Rendered article preview
+        resultHtml += `
+            <div class="article-content" style="font-size:15px; line-height:1.8; color:var(--text);">
+                ${result.html_content}
+            </div>
+        `;
+
+        outputCard.style.display = 'block';
+        output.innerHTML = resultHtml;
+        btn.textContent = '📄 Assemble & Save Article';
+
+    } catch (e) {
+        console.error('Assembly failed:', e);
+        showError(e.message);
+        btn.disabled = false;
+        btn.textContent = '📄 Assemble & Save Article';
     }
-
-    resultHtml += `
-        <div class="article-content" style="font-size:15px; line-height:1.8; color:var(--text);">
-            ${html}
-        </div>
-    `;
-
-    outputCard.style.display = 'block';
-    output.innerHTML = resultHtml;
 }
 
 function showError(message) {
